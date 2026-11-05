@@ -95,6 +95,7 @@ public struct PublishTask: Codable {
 // MARK: - 状态机
 
 public enum TargetPhase: String, Codable {
+    case needLogin      // 需要用户登录
     case pending        // 未开始
     case preparing      // 适配器填充中
     case awaitingConfirm // 草稿就绪，等待人工在浏览器确认发布

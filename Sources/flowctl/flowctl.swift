@@ -110,11 +110,10 @@ struct FlowCTL {
             call("t6", "finish", ["status": "draftReady", "message": "模拟平台草稿就绪", "draft_url": url]),
         ])
 
-        let loop = AgentLoop(llm: scripted, bridge: bridge)
-        loop.onEvent = { print("  [agent] \($0)") }
-
         print("\n== agent 填充（假模型驱动真实工具层）==")
-        let result = try await loop.run(goal: "把测试内容填入模拟平台页面，停在草稿。")
+        let result = try await AgentDispatchService.run(llm: scripted, bridge: bridge,
+            goal: "把测试内容填入模拟平台页面，停在草稿。",
+            onEvent: { print("  [agent] \($0)") })
         guard result.status == "draftReady" else {
             throw DemoError("agent 未能就绪：\(result.message)")
         }

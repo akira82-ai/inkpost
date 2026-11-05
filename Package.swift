@@ -23,5 +23,6 @@ let package = Package(
             name: "flowctl",
             dependencies: ["PublishKit"]
         ),
+        .testTarget(name: "PublishKitTests", dependencies: ["PublishKit"]),
     ]
 )

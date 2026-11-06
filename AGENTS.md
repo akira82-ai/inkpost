@@ -33,3 +33,8 @@
 - When building and running the app, use the project's configured formal code-signing identity. Do not use ad-hoc signing or silently fall back to unsigned builds. If the identity is missing or ambiguous, report the blocker and resolve the signing configuration before launching.
 - After the new build succeeds and its signature is verified, automatically stop the previous Inkpost app process and launch the newly built app. Target only this application's process; do not stop unrelated processes.
 - If building or signing fails, keep the existing app running and report the failure. Verify that the new app launches successfully before reporting completion.
+
+## Issue naming
+
+- Present issues as `#序号 「模型/业务/视图」具体事项`, choosing one category according to the primary scope: `模型` for domain data, state and rules; `业务` for workflow, coordination and execution; `视图` for UI, layout and interactions.
+- The title itself MUST include the literal `#` and the actual GitHub-assigned issue number, for example `#6 「视图」分发时自动隐藏窗口并显示菜单栏进度`. GitHub's separate number display does not satisfy this requirement. Never predict the number: create the issue, obtain its assigned number, then update its title to the complete format. When renaming, replace an existing numeric prefix rather than duplicating it.

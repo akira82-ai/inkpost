@@ -113,7 +113,7 @@ struct FlowCTL {
         ])
 
         print("\n== agent 填充（假模型驱动真实工具层）==")
-        let result = try await AgentDispatchService.run(llm: scripted, bridge: bridge,
+        let result = try await AgentExecutor.run(llm: scripted, bridge: bridge,
             goal: "把测试内容填入模拟平台页面，停在草稿。",
             onEvent: { print("  [agent] \($0)") })
         guard result.status == "draftReady" else {

@@ -95,6 +95,7 @@ public final class AgentLoop {
     let bridge: EgoBridge
     let maxSteps: Int
     public var onEvent: (@Sendable (String) -> Void)?
+    public var onStage: (@Sendable (ChannelStage) async throws -> Void)?
 
     public init(llm: LLMSession, bridge: EgoBridge, maxSteps: Int = 24) {
         self.llm = llm
@@ -188,7 +189,8 @@ public final class AgentLoop {
             case .toolCalls(let calls):
                 messages.append(ChatMessage(role: "assistant", content: nil, tool_calls: calls))
                 for call in calls {
-                    let outcome = await execute(call)
+                    try Task.checkCancellation()
+                    let outcome = try await execute(call)
                     messages.append(ChatMessage(role: "tool", content: outcome, tool_call_id: call.id))
                     if call.function.name == "finish" {
                         let args = parse(call.function.arguments)
@@ -209,10 +211,20 @@ public final class AgentLoop {
     }
 
     /// 工具执行映射；只读检查固定实现，写入工具仍需审查操作范围。
-    func execute(_ call: ToolCall) async -> String {
+    func execute(_ call: ToolCall) async throws -> String {
+        try Task.checkCancellation()
         let name = call.function.name
         let args = parse(call.function.arguments)
         onEvent?(name == "navigate" ? "▸ navigate：\(args["url"] as? String ?? "缺少 URL")" : "▸ \(name)")
+        let stage: ChannelStage?
+        switch name {
+        case "navigate": stage = .openingEditor
+        case "fill", "paste_html": stage = .fillingContent
+        case "upload": stage = .uploadingAssets
+        case "inspect": stage = .verifyingContent
+        default: stage = nil
+        }
+        if let stage { try await onStage?(stage) }
         do {
             let payload: String
             switch name {
@@ -241,6 +253,10 @@ public final class AgentLoop {
             // 快照可能很大，压缩空白
             return payload.replacingOccurrences(of: "\n{2,}", with: "\n", options: .regularExpression)
         } catch {
+            if error is CancellationError || Task.isCancelled { throw CancellationError() }
+            if stage == .fillingContent || stage == .uploadingAssets {
+                throw ChannelFailure(code: .operationResultUnknown, stage: stage!, detail: error.localizedDescription, recovery: .inspectionRequired)
+            }
             onEvent?("✗ \(name)：\(error.localizedDescription)")
             // 工具失败也回喂给模型，让它自行调整（这正是 agent 相对死脚本的价值）
             return "{\"ok\":false,\"error\":\"\(error.localizedDescription.replacingOccurrences(of: "\"", with: "'"))\"}"

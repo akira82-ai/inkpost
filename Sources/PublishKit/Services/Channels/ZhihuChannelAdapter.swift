@@ -1,138 +1,235 @@
 import Foundation
 
+/// A task-scoped thoughts workflow. Browser writes use ego Lite's native interactions only.
 final class ZhihuChannelAdapter: ChannelAdapter {
     let platform: PlatformID = .zhihu
-    let capabilities = ChannelCapabilities(usesTitle: false, requiresLLM: false, maximumImages: 6, entryURL: "https://www.zhihu.com/")
-    private var zhihuPendingImage: Int?
-    private var zhihuUploaded = 0
+    let capabilities = ChannelCapabilities(usesTitle: true, requiresLLM: false, maximumImages: 6, entryURL: "https://www.zhihu.com/")
+    private static let titleTarget = "textarea[name=\"title\"]"
+    private static let bodyTarget = "[contenteditable=\"true\"]"
+    private var images = ImageProgress()
 
-    func goal(for request: ChannelRequest) -> String {
-        let title = request.title, html = request.html, plain = request.body, tags = request.tags, assets = request.assets
-        let tagText = tags.isEmpty ? "无" : tags.map { "#\($0)" }.joined(separator: " ")
-        let imageInfo = assets.isEmpty ? "无图片" : "图片 \(assets.count) 张，本地路径：\(assets.joined(separator: "；"))"
-        let opening = "把以下内容填入平台创作页，停在草稿状态（绝不点击发布/提交/发送类按钮）。\n- 标题：\(title)\n- 正文纯文本：\(plain)\n- 正文 HTML：\(html)\n- \(imageInfo)\n"
+    @MainActor
+    func execute(request: ChannelRequest, context: ChannelExecutionContext) async throws -> ChannelOutcome {
+        try context.advance(.validatingRequest)
+        try PlatformRules.validate(request, capabilities: capabilities)
+        try context.advance(.openingEditor)
+        context.diagnostic("打开知乎首页，定位「分享此刻的想法」")
+        let raw = try await Self.navigate(bridge: context.bridge, url: capabilities.entryURL!)
+        let navigation = try JSONDecoder().decode(Navigation.self, from: Data(raw.utf8))
+        try context.advance(.checkingLogin)
+        if navigation.loginRequired == true {
+            return .waitingForUser(.init(code: .loginRequired, stage: .checkingLogin,
+                detail: "请登录知乎后继续此渠道", recovery: .loginRequired))
+        }
+        guard navigation.composerReady == true else { throw failure(.editorUnavailable, .openingEditor, "知乎想法编辑器尚未展开") }
+        context.diagnostic("想法编辑器已展开")
 
-            return opening + """
-                - 平台：知乎想法（动态），不发布专栏文章。入口：https://www.zhihu.com/
-                - navigate 工具会确定性点击首页“分享此刻的想法…”并等待标题与正文输入框展开；随后 snapshot 定位控件。不要调用不存在的 click 工具，不进入写文章或专栏页面，不猜测选择器。
-                - 仅填写正文，不把输入标题自动并入正文，不寻找文章标题框；保留正文全部内容与换行，不改写或截断。以纯文本填写想法编辑器，HTML 仅作内容参考。
-                - 图片上传到该想法编辑器对应的图片控件；话题\(tagText == "无" ? "无，跳过" : "（\(tagText)）追加到正文结尾")。图片失败不得报告已填好。
-                - 自检完整正文与图片数量，返回实际 body_target 与图片校验位置。停在编辑状态，不假定平台已自动保存草稿，绝不点击“发想法”或其他最终发布按钮。
-                - finish(status:"draftReady")。
-                """
+        // Inspect all existing content before the first write; preserve conflicting user content.
+        let initial = try await readPage(context.bridge)
+        try initial.checkContent(request, allowEmpty: true)
+        try images.validate(initial.images)
+        try context.advance(.fillingContent)
+        try await fillTitle(request.title, existing: initial.title, bridge: context.bridge)
+        try await fillBody(request.taggedBody, existing: initial.body, bridge: context.bridge)
+        let filled = try await readPage(context.bridge)
+        try filled.checkContent(request, allowEmpty: false)
+        context.diagnostic("标题、完整正文与标签已回读核对")
+
+        try context.advance(.uploadingAssets)
+        try await uploadImages(request.assets, context: context)
+        try context.advance(.verifyingContent)
+        let final = try await readPage(context.bridge)
+        try final.checkContent(request, allowEmpty: false)
+        try images.validate(final.images)
+        guard final.images.count == request.assets.count, final.images.allSatisfy(\.ready), images.pending == nil else {
+            throw failure(.verificationFailed, .verifyingContent, "图片数量或上传状态不完整")
+        }
+        return .readyForReview(message: "标题、正文、标签及 \(request.assets.count) 张图片已核对，请检查后亲手发想法")
+    }
+
+    private func fillTitle(_ title: String, existing: String, bridge: EgoBridge) async throws {
+        guard existing.isEmpty else { return }
+        _ = try await bridge.fill(target: Self.titleTarget, text: title)
+    }
+
+    private func fillBody(_ body: String, existing: String, bridge: EgoBridge) async throws {
+        guard existing.isEmpty else { return }
+        _ = try await ClipboardPasteService.withTextPaste {
+            try await bridge.run("""
+                // zhihu:paste-body
+                await page.click(\(bridge.jsStr(Self.bodyTarget)), {label:'粘贴完整正文和标签'});
+                await page.keyboard.paste(\(bridge.jsStr(body)));
+                cliLog(JSON.stringify({ok:true}));
+                """)
+        }
     }
 
     @MainActor
-    func prepare(request: ChannelRequest, bridge: EgoBridge, config: LLMConfig,
-                 onEvent: @escaping @Sendable (String) -> Void) async throws -> EgoBridge.Finish {
-        let body = request.body, tags = request.tags, assets = request.assets
-        onEvent("打开首页想法编辑器")
-        let navigation = try await Self.navigate(bridge: bridge, url: "https://www.zhihu.com/")
-        let nav = try JSONSerialization.jsonObject(with: Data(navigation.utf8)) as? [String: Any]
-        if nav?["loginRequired"] as? Bool == true { return .init(status: "needLogin", message: "请登录知乎后继续此渠道") }
-        try Task.checkCancellation()
-        let text = body + (tags.isEmpty ? "" : "\n\n" + tags.map { "#" + $0 }.joined(separator: " "))
-        _ = try await bridge.run("""
-            const expected = \(bridge.jsStr(text));
-            const current = await page.evaluate(() => document.querySelector('[contenteditable=true]').innerText);
-            const normalize = value => value.replace(/\\s+/g, '');
-            if (normalize(current) && normalize(current) !== normalize(expected)) throw new Error('知乎已有其他正文，已保留，请手动检查后重新开始');
-            if (!normalize(current)) {
-              await page.click('[contenteditable="true"]', {label:'填写完整想法正文'});
-              await page.keyboard.paste(expected);
-            }
-            cliLog(JSON.stringify({ok:true}));
-            """)
-        let clipboard = ImageClipboardSession()
+    private func uploadImages(_ paths: [String], context: ChannelExecutionContext) async throws {
+        guard !paths.isEmpty else { return }
+        let clipboard = try ImageClipboardSession.acquire()
         defer { clipboard.restore() }
-        for (index, path) in assets.enumerated() {
+        for index in paths.indices {
             try Task.checkCancellation()
-            if index < zhihuUploaded { continue }
-            let count = try await zhihuImageCount(bridge)
-            if zhihuPendingImage == index {
-                guard count == index + 1 else { throw EgoBridge.BridgeError.toolFailed("上次图片粘贴结果不确定，请检查知乎附件后重新开始，未重复粘贴") }
-            } else {
-                guard count == index else { throw EgoBridge.BridgeError.toolFailed("知乎已有图片与任务不一致，请检查后重新开始") }
-                try clipboard.writePNG(path: path)
-                zhihuPendingImage = index
-                onEvent("粘贴图片 \(index + 1)/\(assets.count)")
-                _ = try await bridge.run("""
-                    await page.click('[contenteditable="true"]', {label:'粘贴下一张想法图片'});
+            let current = try await readPage(context.bridge)
+            try images.validate(current.images)
+            if index < images.confirmed.count { continue }
+            if images.pending == nil {
+                guard current.images.count == index else { throw failure(.verificationFailed, .uploadingAssets, "知乎附件与任务不一致，未继续粘贴") }
+                try clipboard.writePNG(path: paths[index])
+                // Record uncertainty before dispatch: a failed command may already have pasted.
+                images.pending = index
+                try context.progress(completed: index, total: paths.count)
+                _ = try await context.bridge.run("""
+                    // zhihu:paste-image
+                    await page.click(\(context.bridge.jsStr(Self.bodyTarget)), {label:'粘贴下一张想法图片'});
                     await page.keyboard.press('Meta+V');
                     cliLog(JSON.stringify({ok:true}));
                     """)
             }
-            try await waitForZhihuImages(bridge, count: index + 1)
-            try Task.checkCancellation()
-            zhihuUploaded = index + 1; zhihuPendingImage = nil
-            onEvent("图片 \(index + 1)/\(assets.count) 上传完成")
+            try await waitForImages(context.bridge, count: index + 1)
+            let completed = try await readPage(context.bridge)
+            try images.validate(completed.images)
+            guard completed.images.count == index + 1, completed.images.allSatisfy(\.ready) else {
+                throw failure(.uploadFailed, .uploadingAssets, "第 \(index + 1) 张图片尚未上传完成")
+            }
+            images.confirmed = completed.images.map(\.identity)
+            images.pending = nil
+            try context.progress(completed: index + 1, total: paths.count)
         }
-        try await waitForZhihuImages(bridge, count: assets.count)
-        var result = EgoBridge.Finish(status: "draftReady", message: "正文及 \(assets.count) 张图片已填好，请检查后亲手发想法", draftURL: "https://www.zhihu.com/")
-        result.bodyTarget = "[contenteditable=\"true\"]"
-        return result
     }
 
-    private func zhihuImageCount(_ bridge: EgoBridge) async throws -> Int {
-        let raw = try await bridge.evaluate(js: "document.querySelector('[contenteditable=true]').closest('.InputLike').querySelectorAll('.ImageArea .DraggableTags-tag:not(.DraggableTags-undraggable)').length")
-        let value = try JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any]
-        guard let count = value?["value"] as? Int else { throw EgoBridge.BridgeError.toolFailed("无法读取知乎附件数量") }
-        return count
+    /// Task-local checkpoints. A pending paste is never blindly repeated after a failure.
+    struct ImageProgress {
+        var confirmed: [String] = []
+        var pending: Int?
+
+        func validate(_ images: [ImageState]) throws {
+            guard images.count >= confirmed.count,
+                  Array(images.prefix(confirmed.count).map(\.identity)) == confirmed,
+                  images.prefix(confirmed.count).allSatisfy(\.ready) else {
+                throw ChannelFailure(code: .verificationFailed, stage: .uploadingAssets,
+                    detail: "已确认的知乎图片被删除、替换、重排或不再可用，请检查页面", recovery: .inspectionRequired)
+            }
+            guard images.count == confirmed.count + (pending == nil ? 0 : 1) else {
+                throw ChannelFailure(code: pending == nil ? .verificationFailed : .operationResultUnknown, stage: .uploadingAssets,
+                    detail: "知乎附件与任务进度不一致，请检查页面；不会重复粘贴", recovery: .inspectionRequired)
+            }
+        }
     }
 
-    private func waitForZhihuImages(_ bridge: EgoBridge, count: Int) async throws {
-        _ = try await bridge.run("""
-            await page.waitForFunction(expected => {
-              const editor = document.querySelector('[contenteditable=true]');
-              if (!editor) return false;
-              const tiles = [...editor.closest('.InputLike').querySelectorAll('.ImageArea .DraggableTags-tag:not(.DraggableTags-undraggable)')];
-              return tiles.length === expected && tiles.every(tile => {
-                const image = tile.querySelector('img');
-                return image && image.complete && image.naturalWidth > 0 && image.src.startsWith('https:') && !tile.querySelector('.CircleLoadingBar');
-              });
-            }, \(count), {timeout:60000});
-            cliLog(JSON.stringify({ok:true}));
+    struct ImageState: Decodable, Equatable {
+        let identity: String
+        let ready: Bool
+    }
+    struct PageState: Decodable {
+        let title: String
+        let body: String
+        let titleLimit: Int?
+        let titleValid: Bool
+        let images: [ImageState]
+
+        func checkContent(_ request: ChannelRequest, allowEmpty: Bool) throws {
+            if let titleLimit, titleLimit >= 0, request.title.utf16.count > titleLimit {
+                throw ChannelFailure(code: .contentUnsupported, stage: .fillingContent,
+                    detail: "标题超过知乎编辑器上限（\(titleLimit)）", recovery: .contentChangeRequired)
+            }
+            guard titleValid else { throw ChannelFailure(code: .contentUnsupported, stage: .fillingContent,
+                detail: "知乎编辑器未接受此标题，请检查标题限制", recovery: .contentChangeRequired) }
+            guard title == request.title || (allowEmpty && title.isEmpty) else {
+                throw ChannelFailure(code: .verificationFailed, stage: allowEmpty ? .fillingContent : .verifyingContent,
+                    detail: "知乎标题与提交内容不一致，已保留页面内容", recovery: .inspectionRequired)
+            }
+            // CRLF is one line break. Preserve spaces and every empty paragraph.
+            func lines(_ text: String) -> String { text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n") }
+            guard lines(body) == lines(request.taggedBody) || (allowEmpty && body.isEmpty) else {
+                throw ChannelFailure(code: .verificationFailed, stage: allowEmpty ? .fillingContent : .verifyingContent,
+                    detail: "知乎正文、段落或标签与提交内容不一致，已保留页面内容", recovery: .inspectionRequired)
+            }
+        }
+    }
+    private struct Navigation: Decodable { let loginRequired: Bool?; let composerReady: Bool? }
+    private struct PageResult: Decodable { let value: PageState }
+
+    private func readPage(_ bridge: EgoBridge) async throws -> PageState {
+        let raw = try await bridge.run("""
+            // zhihu:read-page
+            const value = await page.evaluate(() => {
+              \(Self.readPageSource)
+            });
+            cliLog(JSON.stringify({ok:true,value}));
             """)
+        return try JSONDecoder().decode(PageResult.self, from: Data(raw.utf8)).value
+    }
+
+    /// Read Draft's logical blocks: innerText inserts extra visual line breaks around empty blocks.
+    private static let readPageSource = """
+        if (location.origin !== 'https://www.zhihu.com' || location.pathname !== '/') throw new Error('知乎页面已离开首页');
+        const visible = el => !!el && el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0 && getComputedStyle(el).visibility !== 'hidden';
+        const title = document.querySelector('textarea[name="title"]');
+        const body = document.querySelector('[contenteditable="true"]');
+        if (!visible(title) || !visible(body)) throw new Error('知乎想法编辑器不可操作，请展开后继续');
+        const blocks = [...body.querySelectorAll('[data-block="true"]')];
+        if (!blocks.length) throw new Error('知乎正文结构发生变化，无法核对段落');
+        const root = body.closest('.InputLike');
+        if (!root) throw new Error('无法定位知乎附件区域');
+        const images = [...root.querySelectorAll('.ImageArea .DraggableTags-tag:not(.DraggableTags-undraggable)')].map(tile => {
+          const img = tile.querySelector('img');
+          const url = img ? new URL(img.src) : null;
+          return {identity: url ? url.origin + url.pathname : '',
+            ready: !!img && img.complete && img.naturalWidth > 0 && url.protocol === 'https:' && !tile.querySelector('.CircleLoadingBar')};
+        });
+        return {title:title.value, body:blocks.map(block => block.textContent).join('\\n'),
+          titleLimit:title.hasAttribute('maxlength') ? title.maxLength : null, titleValid:title.validity.valid, images};
+        """
+
+    private func waitForImages(_ bridge: EgoBridge, count: Int) async throws {
+        do {
+            _ = try await bridge.run("""
+                // zhihu:wait-images
+                await page.waitForFunction(expected => {
+                  const state = (() => { \(Self.readPageSource) })();
+                  return state.images.length === expected && state.images.every(image => image.ready);
+                }, \(count), {timeout:60000});
+                cliLog(JSON.stringify({ok:true}));
+                """)
+        } catch {
+            if error is CancellationError || Task.isCancelled { throw CancellationError() }
+            throw failure(.uploadFailed, .uploadingAssets, "等待第 \(count) 张图片上传失败：\(error.localizedDescription)")
+        }
+    }
+
+    private func failure(_ code: ChannelErrorCode, _ stage: ChannelStage, _ detail: String) -> ChannelFailure {
+        .init(code: code, stage: stage, detail: detail, recovery: .inspectionRequired)
     }
 
     static func navigate(bridge: EgoBridge, url: String) async throws -> String {
-            guard let destination = URL(string: url), destination.scheme == "https",
-                  destination.host == "www.zhihu.com", destination.path.isEmpty || destination.path == "/",
-                  destination.query == nil, destination.fragment == nil else {
-                throw EgoBridge.BridgeError.toolFailed("知乎想法仅允许打开首页，不能转到文章或其他页面")
-            }
-            return try await bridge.run("""
-                if (await page.url() !== 'https://www.zhihu.com/') {
-                  await page.goto('https://www.zhihu.com/');
-                }
-                await page.waitForFunction(() =>
-                  document.body.innerText.includes('分享此刻的想法') ||
-                  document.querySelector('textarea[name="title"]') ||
-                  document.querySelector('input[type="password"]') ||
-                  location.pathname.includes('signin'), undefined, { timeout: 15000 });
-                const loginRequired = await page.evaluate(() =>
-                  location.pathname.includes('signin') || !!document.querySelector('input[type="password"]'));
-                if (loginRequired) {
-                  cliLog(JSON.stringify({ok:true, loginRequired:true}));
-                } else {
-                  const expanded = await page.evaluate(() => {
-                    const el = document.querySelector('textarea[name="title"]');
-                    return !!el && el.getBoundingClientRect().width > 0;
-                  });
-                  if (!expanded) {
-                    await page.click('text="分享此刻的想法..."', { label: '展开知乎想法编辑器' });
-                  }
-                  await page.waitForSelector('textarea[name="title"]', { state: 'visible', timeout: 10000 });
-                  await page.waitForSelector('[contenteditable="true"]', { state: 'visible', timeout: 10000 });
-                  cliLog(JSON.stringify({ok:true, url:await page.url(), composerReady:true,
-                    titleTarget:'textarea[name="title"]', bodyTarget:'[contenteditable="true"]'}));
-                }
-                """);
+        guard let destination = URL(string: url), destination.scheme == "https",
+              destination.host == "www.zhihu.com", destination.path.isEmpty || destination.path == "/",
+              destination.query == nil, destination.fragment == nil else {
+            throw EgoBridge.BridgeError.toolFailed("知乎想法仅允许打开首页，不能转到文章或其他页面")
         }
-
-    @MainActor
-    func verify(bridge: EgoBridge, result: EgoBridge.Finish, title: String, body: String, imageCount: Int) async throws {
-        try await DraftVerifier.verify(bridge: bridge, result: result, title: title, body: body, imageCount: 0, usesTitle: false)
-        try await waitForZhihuImages(bridge, count: imageCount)
+        return try await bridge.run("""
+            // zhihu:open-editor
+            if (await page.url() !== 'https://www.zhihu.com/') await page.goto('https://www.zhihu.com/');
+            await page.waitForFunction(() => {
+              const visible = el => !!el && el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0;
+              return document.body.innerText.includes('分享此刻的想法') || visible(document.querySelector('textarea[name="title"]')) ||
+                visible(document.querySelector('input[type="password"]')) || location.pathname.includes('signin');
+            }, undefined, {timeout:15000});
+            const loginRequired = await page.evaluate(() => location.pathname.includes('signin') ||
+              [...document.querySelectorAll('input[type="password"]')].some(el => el.getBoundingClientRect().width > 0));
+            if (loginRequired) cliLog(JSON.stringify({ok:true,loginRequired:true}));
+            else {
+              const expanded = await page.evaluate(() => {
+                const el = document.querySelector('textarea[name="title"]');
+                return !!el && el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0;
+              });
+              if (!expanded) await page.click('text="分享此刻的想法..."', {label:'展开知乎想法编辑器'});
+              await page.waitForSelector('textarea[name="title"]', {state:'visible',timeout:10000});
+              await page.waitForSelector('[contenteditable="true"]', {state:'visible',timeout:10000});
+              cliLog(JSON.stringify({ok:true,composerReady:true}));
+            }
+            """)
     }
 }

@@ -11,9 +11,7 @@ public final class DispatchController {
     @ObservationIgnored private let assets = AssetService()
     @ObservationIgnored private let notifier = CompletionNotifier()
     @ObservationIgnored private var draftRequest: ChannelRequest?
-    @ObservationIgnored private var draftTitle = ""
-    @ObservationIgnored private var draftBody = ""
-    @ObservationIgnored private var draftImageCount = 0
+    @ObservationIgnored private var attempts: [PlatformID: UUID] = [:]
     @ObservationIgnored private var taskConfig: LLMConfig?
     @ObservationIgnored private var generation = UUID()
 
@@ -110,20 +108,24 @@ public final class DispatchController {
         }
     }
     public func resume(_ platform: PlatformID) {
-        guard state.overallPhase != .preparing, [.failed, .needLogin].contains(state.platformPhase[platform] ?? .pending), taskConfig != nil else { return }
+        guard state.overallPhase != .preparing, state.platformOutcomes[platform]?.canResume == true, taskConfig != nil else { return }
         state.overallPhase = .preparing
         let token = generation
         runningTask = Task {
-            do { try await service.resumeControl(); try await runOnePlatform(platform) }
-            catch { guard generation == token else { return }; state.platformPhase[platform] = .failed; state.platformMessages[platform] = error.localizedDescription }
+            do { try await service.resumeControl(); try await runOnePlatform(platform, command: .resumeAfterUser) }
+            catch {
+                guard generation == token else { return }
+                if error is CancellationError || Task.isCancelled { state.platformPhase[platform] = .cancelled }
+                else { apply(.failed(.init(code: .executionFailed, stage: .openingEditor, detail: error.localizedDescription, recovery: .retryAllowed)), to: platform) }
+            }
             guard generation == token else { return }
             finishTask()
         }
     }
     private func finishTask() {
         state.currentPlatform = nil
-        state.overallPhase = state.taskPlatforms.allSatisfy { state.platformPhase[$0] == .awaitingConfirm } ? .awaitingConfirm : .failed
-        let message = state.overallPhase == .awaitingConfirm ? "全部已填好，请检查并发布" : "部分渠道需要您手工处理"
+        state.overallPhase = state.taskPlatforms.contains { state.platformPhase[$0] == .cancelled } ? .cancelled : (state.taskPlatforms.allSatisfy { state.platformPhase[$0] == .awaitingConfirm } ? .awaitingConfirm : .failed)
+        let message = state.overallPhase == .cancelled ? "已停止处理，内容已保留，请检查浏览器页面" : (state.overallPhase == .awaitingConfirm ? "全部已填好，请检查并发布" : "部分渠道需要您手工处理")
         state.notice = message
         Task { await notifier.deliver(message) }
     }
@@ -135,7 +137,7 @@ public final class DispatchController {
         state.overallPhase = .preparing
         state.errorMessage = nil
         state.eventLog = []
-        state.manualReceipt = ""
+        state.platformOutcomes = [:]; state.platformEvents = [:]; attempts = [:]
         for p in state.selectedPlatforms { state.platformPhase[p] = .pending }
 
         let platforms = state.selectedPlatforms
@@ -145,7 +147,6 @@ public final class DispatchController {
         taskConfig = LLMConfig(baseURL: DispatchSettings.baseURL, apiKey: state.apiKey, model: state.model)
         let html = MarkdownLite.render(state.markdown)
         let plain = MarkdownLite.plain(state.markdown)
-        draftTitle = state.title; draftBody = plain; draftImageCount = state.assetPaths.count
         let tags = state.tagsText
             .split(whereSeparator: { $0.isWhitespace })
             .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "#")) }
@@ -155,20 +156,32 @@ public final class DispatchController {
         draftRequest = ChannelRequest(title: state.title, body: plain, html: html, tags: tags, assets: assets)
         runningTask = Task {
             await notifier.prepare()
-            do { try await service.beginTask() } catch {
-                state.errorMessage = error.localizedDescription
-                for p in platforms { state.platformPhase[p] = .failed; state.platformMessages[p] = error.localizedDescription }
+            do { try await service.beginTask(id: token) } catch {
+                guard generation == token else { return }
+                let cancelled = error is CancellationError || Task.isCancelled
+                if !cancelled { state.errorMessage = error.localizedDescription }
+                for p in platforms {
+                    state.platformPhase[p] = cancelled ? .cancelled : .failed
+                    state.platformMessages[p] = cancelled ? "已取消" : error.localizedDescription
+                }
                 finishTask(); return
             }
             for p in platforms {
-                if Task.isCancelled || token != generation { return }
+                guard token == generation else { return }
+                if Task.isCancelled {
+                    for pending in platforms where state.platformPhase[pending] == .pending { state.platformPhase[pending] = .cancelled }
+                    break
+                }
                 do {
                     try await runOnePlatform(p)
                 } catch {
                     guard generation == token else { return }
-                    state.platformPhase[p] = .failed
-                    state.platformMessages[p] = error.localizedDescription
-                    log("【\(p.title)】✗ 异常：\(error.localizedDescription)")
+                    if error is CancellationError || Task.isCancelled {
+                        state.platformPhase[p] = .cancelled
+                        for pending in platforms where state.platformPhase[pending] == .pending { state.platformPhase[pending] = .cancelled }
+                        break
+                    }
+                    apply(.failed(.init(code: .executionFailed, stage: .openingEditor, detail: error.localizedDescription, recovery: .retryAllowed)), to: p)
                 }
             }
             guard generation == token else { return }
@@ -179,50 +192,52 @@ public final class DispatchController {
         }
     }
 
-    func runOnePlatform(_ p: PlatformID) async throws {
-        state.currentPlatform = p
-        state.platformPhase[p] = .preparing
-        let result = try await service.prepare(platform: p,
-            request: draftRequest!,
-            config: taskConfig!,
-            onEvent: { [weak self] msg in
-                Task { @MainActor in self?.log("【\(p.title)】\(msg)") }
-            })
+    func runOnePlatform(_ platform: PlatformID, command: ChannelCommand = .prepare) async throws {
+        guard let request = draftRequest, let config = taskConfig else { return }
+        let execution = ChannelExecutionID(taskID: generation, platform: platform)
+        attempts[platform] = execution.attemptID
+        defer { if attempts[platform] == execution.attemptID { attempts[platform] = nil } }
+        state.currentPlatform = platform
+        state.platformPhase[platform] = .preparing
+        let outcome = try await service.execute(request: request, execution: execution, command: command, config: config,
+            onEvent: { [weak self] event in self?.receive(event) })
         try Task.checkCancellation()
-        state.platformMessages[p] = result.message
-        switch result.status {
-        case "draftReady":
-            try await service.verifyDraft(platform: p, result: result, title: draftTitle, body: draftBody, imageCount: draftImageCount)
-            state.platformPhase[p] = .awaitingConfirm
-            log("【\(p.title)】✅ 草稿就绪：\(result.message)")
-        case "needLogin":
-            state.platformPhase[p] = .needLogin
-            log("【\(p.title)】⚠️ 需要登录：请在 ego lite 打开\(p.title)登录后重试该平台")
-        default:
-            state.platformPhase[p] = .failed
-            log("【\(p.title)】✗ 失败：\(result.message)")
-        }
+        guard generation == execution.taskID, attempts[platform] == execution.attemptID else { return }
+        attempts[platform] = nil
+        apply(outcome, to: platform)
     }
 
-    /// fixture 回执回读；真实平台请手动粘贴发布链接
-    public func readFixtureReceipt(for p: PlatformID) {
-        Task {
-            do {
-                let url = try await service.readReceipt(for: p)
-                if !url.isEmpty {
-                    state.manualReceipt = url
-                    log("✅ 回执：\(url)")
-                } else {
-                    state.errorMessage = "未读取到回执：请在 fixture 页面点「确认发布」后重试"
-                }
-            } catch {
-                state.errorMessage = error.localizedDescription
-            }
+    func receive(_ event: ChannelEvent) {
+        guard event.execution.taskID == generation,
+              attempts[event.execution.platform] == event.execution.attemptID,
+              state.platformPhase[event.execution.platform] == .preparing else { return }
+        state.platformEvents[event.execution.platform] = event
+        if case .diagnostic(let message) = event.payload { log(message) }
+    }
+
+    private func apply(_ outcome: ChannelOutcome, to platform: PlatformID) {
+        state.platformOutcomes[platform] = outcome
+        switch outcome {
+        case .readyForReview(let message):
+            state.platformPhase[platform] = .awaitingConfirm
+            state.platformMessages[platform] = message
+        case .waitingForUser(let failure):
+            state.platformPhase[platform] = failure.recovery == .loginRequired ? .needLogin : .failed
+            state.platformMessages[platform] = failure.detail
+        case .failed(let failure):
+            state.platformPhase[platform] = .failed
+            state.platformMessages[platform] = failure.detail
         }
+        if let failure = outcome.failure { log("[\(platform.rawValue)] \(failure.code.rawValue) / \(failure.stage.rawValue) / \(failure.diagnosticID): \(failure.detail)") }
+    }
+
+    public func cancel() {
+        guard state.overallPhase == .preparing else { return }
+        runningTask?.cancel()
     }
 
     public func editUnfinishedChannels() {
-        guard state.overallPhase == .failed else { return }
+        guard [.failed, .cancelled].contains(state.overallPhase) else { return }
         let unfinished = state.taskPlatforms.filter { state.platformPhase[$0] != .awaitingConfirm }
         reset()
         state.selectedPlatforms = unfinished
@@ -239,12 +254,12 @@ public final class DispatchController {
         runningTask?.cancel()
         state.currentPlatform = nil
         state.platformMessages = [:]
+        state.platformOutcomes = [:]; state.platformEvents = [:]; attempts = [:]
         state.taskPlatforms = []
         draftRequest = nil
         taskConfig = nil
         state.overallPhase = .pending
         state.errorMessage = nil
-        state.manualReceipt = ""
         for p in state.selectedPlatforms { state.platformPhase[p] = .pending }
     }
 }

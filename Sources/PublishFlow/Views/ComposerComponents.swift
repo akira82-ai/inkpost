@@ -438,6 +438,8 @@ struct DispatchStatus: View {
         case .preparing:
             let index = model.currentPlatform.flatMap { model.taskPlatforms.firstIndex(of: $0) }.map { $0 + 1 } ?? 0
             return "正在填写 \(index)/\(model.taskPlatforms.count) 个渠道，可以先忙别的，完成后我会提醒你"
+        case .cancelled:
+            return "已停止填写，内容已保留。正在执行的浏览器操作可能已完成，请先检查页面。"
         case .awaitingConfirm:
             return "全部已填好。请前往浏览器检查，并亲手点击发布；墨驿的填写任务已完成。"
         default:

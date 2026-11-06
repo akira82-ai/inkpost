@@ -109,19 +109,37 @@ public struct EgoLiteEngine {
             if d.isEmpty { h.readabilityHandler = nil } else { errBuf.append(d) }
         }
 
-        try proc.run()
-        try stdin.fileHandleForWriting.write(contentsOf: Data(script.utf8))
-        try? stdin.fileHandleForWriting.close()
-
-        // 超时保护：到点杀进程
-        let killer = Task {
-            try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+        defer {
+            stdout.fileHandleForReading.readabilityHandler = nil
+            stderr.fileHandleForReading.readabilityHandler = nil
+            try? stdin.fileHandleForWriting.close()
+        }
+        let exitCode: Int32 = try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            try proc.run()
+            if Task.isCancelled { proc.terminate() }
+            do {
+                try Task.checkCancellation()
+                try stdin.fileHandleForWriting.write(contentsOf: Data(script.utf8))
+                try stdin.fileHandleForWriting.close()
+            } catch {
+                if proc.isRunning { proc.terminate() }
+                throw error
+            }
+            let killer = Task {
+                do { try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000)) }
+                catch { return }
+                if proc.isRunning { proc.terminate() }
+            }
+            defer { killer.cancel() }
+            let status: Int32 = await withCheckedContinuation { cont in
+                proc.terminationHandler = { p in cont.resume(returning: p.terminationStatus) }
+            }
+            try Task.checkCancellation()
+            return status
+        } onCancel: {
             if proc.isRunning { proc.terminate() }
         }
-        let exitCode: Int32 = await withCheckedContinuation { cont in
-            proc.terminationHandler = { p in cont.resume(returning: p.terminationStatus) }
-        }
-        killer.cancel()
 
         // 给 readability handler 一点时间收尾
         try await Task.sleep(nanoseconds: 200_000_000)

@@ -102,8 +102,11 @@ struct ContentView: View {
                 VStack(spacing: 9) {
                     DispatchAction(model: model, controller: controller)
                     DispatchStatus(model: model)
+                    if model.overallPhase == .preparing {
+                        Button("停止填写", action: controller.cancel).buttonStyle(.plain).font(InkStyle.font(11))
+                    }
                 }.frame(maxWidth: .infinity)
-                if model.overallPhase == .failed {
+                if [.failed, .cancelled].contains(model.overallPhase) {
                     Button("修改未完成渠道的内容", action: controller.editUnfinishedChannels).buttonStyle(.plain).font(InkStyle.font(11)).padding(.top, 12)
                 }
                 if !model.eventLog.isEmpty {
@@ -144,9 +147,11 @@ struct ContentView: View {
                                 .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                                 .padding(.leading, 39)
                         }
-                        Button(model.platformPhase[platform] == .needLogin ? "我已登录，继续" : "已处理，继续") { controller.resume(platform) }
-                            .buttonStyle(.plain).font(InkStyle.font(10)).padding(.leading, 39)
-                            .disabled(model.overallPhase == .preparing)
+                        if let recovery = model.platformOutcomes[platform]?.failure?.recovery, model.platformOutcomes[platform]?.canResume == true {
+                            Button(recovery.actionTitle) { controller.resume(platform) }
+                                .buttonStyle(.plain).font(InkStyle.font(10)).padding(.leading, 39)
+                                .disabled(model.overallPhase == .preparing)
+                        }
                     }
                 }.padding(13).frame(maxWidth: .infinity, alignment: .leading).background(Color(hex: 0xFFFEFB), in: RoundedRectangle(cornerRadius: 9))
                     .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(InkStyle.line))
@@ -156,10 +161,13 @@ struct ContentView: View {
     private func channelState(_ channel: ChannelPresentation) -> String {
         guard let platform = channel.platform, channel.available else { return "实际填写与登录恢复能力尚待验证" }
         switch model.platformPhase[platform] ?? .pending {
-        case .preparing: return "正在填写内容…"
+        case .preparing:
+            if let event = model.platformEvents[platform] { return event.payload.presentationText }
+            return "正在填写内容…"
         case .awaitingConfirm: return "已填好 · 请在浏览器检查"
         case .needLogin: return "需要登录 · 处理后继续"
         case .failed: return "需要您手工处理"
+        case .cancelled: return "已停止 · 请检查浏览器页面"
         default: return "等待填写 · 执行时检查登录状态"
         }
     }

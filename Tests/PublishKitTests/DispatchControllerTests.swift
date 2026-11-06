@@ -33,10 +33,10 @@ struct DispatchControllerTests {
         #expect(controller.state.platformPhase[.zhihu] == .awaitingConfirm)
         #expect(controller.state.platformPhase[.jike] == .needLogin)
         #expect(controller.state.platformPhase[.x] == .failed)
-        #expect(service.goals[0].contains("https://www.zhihu.com/"))
-        #expect(service.goals[0].contains("#swift #macOS"))
-        #expect(service.goals[1].contains("https://web.okjike.com"))
-        #expect(service.goals[2].contains("https://x.com/compose/post"))
+        #expect(service.requests[0].body == "Test body")
+        #expect(service.requests[0].tags == ["swift", "macOS"])
+        #expect(service.requests[1] == service.requests[0])
+        #expect(service.requests[2] == service.requests[0])
     }
 
     @Test func testRetryOnlyResumesFailedChannelAndKeepsSnapshot() async throws {
@@ -46,7 +46,7 @@ struct DispatchControllerTests {
         controller.dispatch()
         try await waitForDispatch(controller)
         #expect(controller.state.overallPhase == .failed)
-        let original = service.goals.last
+        let original = service.requests.last
         let originalBody = service.bodies.last
         let originalTags = service.tagSnapshots.last
         let originalAssets = service.assetSnapshots.last
@@ -57,32 +57,23 @@ struct DispatchControllerTests {
         controller.resume(.x)
         try await waitForDispatch(controller)
         #expect(service.platforms == [.zhihu, .jike, .x, .x])
-        #expect(service.goals.last == original)
+        #expect(service.requests.last == original)
         #expect(service.bodies.last == originalBody)
         #expect(service.tagSnapshots.last == originalTags)
         #expect(service.assetSnapshots.last == originalAssets)
         #expect(controller.state.overallPhase == .awaitingConfirm)
     }
 
-    @Test func testZhihuDeterministicFlowDoesNotRequireLLMKeyOrTitle() {
+    @Test func testZhihuRequiresTitleButNotLLMKey() {
         let controller = makeController(FakeDispatchService())
         controller.state.selectedPlatforms = [.zhihu]
         controller.state.apiKey = ""
         controller.state.title = ""
+        #expect(!controller.canDispatch)
+        controller.state.title = "想法标题"
         #expect(controller.canDispatch)
         controller.state.selectedPlatforms = [.zhihu, .x]
         #expect(!controller.canDispatch)
-    }
-
-    @Test func testZhihuRejectsUnstructuredAgentEntry() async throws {
-        let service = AgentDispatchService()
-        do {
-            _ = try await service.prepare(platform: .zhihu, goal: "unstructured", config: .init(baseURL: "https://unused.invalid", apiKey: "", model: "unused"), onEvent: { _ in })
-            Issue.record("Unstructured Zhihu task unexpectedly accepted")
-        } catch {
-            #expect(error.localizedDescription.contains("结构化"))
-            #expect(service.workspaceID == nil)
-        }
     }
 
     @Test func testZhihuRejectsArticleNavigationBeforeBrowserExecution() async throws {
@@ -101,17 +92,17 @@ struct DispatchControllerTests {
         #expect(PlatformID.zhihu.entryURL == "https://www.zhihu.com/")
         #expect(!PlatformID.zhihu.isArticle)
         #expect(PlatformID.simFixture.isArticle)
-        let goal = PlatformRules.goal(for: .zhihu, title: "Title", html: "", plain: "Body", tags: ["测试"], assets: [])
-        #expect(goal.contains("知乎想法"))
-        #expect(!goal.contains("zhuanlan.zhihu.com"))
-        #expect(goal.contains("不把输入标题自动并入正文"))
+        #expect(ZhihuChannelAdapter().capabilities.usesTitle == true)
     }
 
-    @Test func testFullBodyAndHTMLReachPlatformGoal() {
+    @Test func testFullBodyAndHTMLReachAdapter() {
         let body = String(repeating: "完整内容", count: 400)
-        let goal = PlatformRules.goal(for: .zhihu, title: "Title", html: "<p>rich</p>", plain: body, tags: [], assets: [])
+        let request = ChannelRequest(title: "Title", body: body, html: "<p>rich</p>", tags: ["swift"])
+        let goal = FixtureChannelAdapter().goal(for: request)
         #expect(goal.contains(body))
         #expect(goal.contains("<p>rich</p>"))
+        #expect(goal.contains("#swift"))
+        #expect(XChannelAdapter().goal(for: request).contains("#swift"))
     }
 
     @Test func testVerificationFailureIsNotReportedAsFilled() async throws {
@@ -166,17 +157,13 @@ struct DispatchControllerTests {
         #expect(service.platforms.isEmpty)
     }
 
-    @Test func testReceiptAndReset() async throws {
-        let service = FakeDispatchService()
-        let controller = makeController(service)
-        controller.readFixtureReceipt(for: .simFixture)
-        let deadline = Date().addingTimeInterval(3)
-        while controller.state.manualReceipt.isEmpty && Date() < deadline {
-            try await Task.sleep(nanoseconds: 1_000_000)
-        }
-        #expect(controller.state.manualReceipt == "https://example.com/post/1")
+    @Test func testResetClearsContractState() async throws {
+        let controller = makeController(FakeDispatchService())
+        controller.dispatch(); try await waitForDispatch(controller)
+        #expect(!controller.state.platformOutcomes.isEmpty)
         controller.reset()
-        #expect(controller.state.manualReceipt.isEmpty)
+        #expect(controller.state.platformOutcomes.isEmpty)
+        #expect(controller.state.platformEvents.isEmpty)
         #expect(controller.state.overallPhase == .pending)
     }
 
@@ -226,6 +213,41 @@ struct DispatchControllerTests {
         #expect(settings.load().model == "model")
     }
 
+    @Test func testCancellationStopsLaterChannelsAndPreservesDraft() async throws {
+        let service = FakeDispatchService(); service.pause = true
+        let controller = makeController(service)
+        controller.dispatch()
+        while service.platforms.isEmpty { try await Task.sleep(for: .milliseconds(1)) }
+        controller.cancel(); try await waitForDispatch(controller)
+        #expect(controller.state.overallPhase == .cancelled)
+        #expect(service.platforms == [.zhihu])
+        #expect(controller.state.platformPhase[.x] == .cancelled)
+        #expect(controller.state.markdown == "Test **body**")
+        controller.editUnfinishedChannels()
+        #expect(controller.state.overallPhase == .pending)
+    }
+
+    @Test func testOldTaskAndWrongAttemptEventsAreIgnored() async throws {
+        let service = FakeDispatchService()
+        let controller = makeController(service)
+        controller.dispatch(); try await waitForDispatch(controller)
+        let previous = try #require(service.callbacks.first)
+        let oldID = try #require(service.executions.first)
+        controller.reset(); service.pause = true
+        controller.dispatch()
+        while service.platforms.count == 3 { try await Task.sleep(for: .milliseconds(1)) }
+        let callback = try #require(service.callbacks.last)
+        let current = try #require(service.executions.last)
+        previous(.init(execution: oldID, payload: .diagnostic("old task")))
+        callback(.init(execution: .init(taskID: current.taskID, platform: current.platform), payload: .diagnostic("wrong attempt")))
+        #expect(!controller.state.eventLog.contains { $0.contains("old task") || $0.contains("wrong attempt") })
+        callback(.init(execution: current, payload: .stage(.uploadingAssets)))
+        #expect(controller.state.platformEvents[current.platform]?.payload == .stage(.uploadingAssets))
+        controller.cancel(); try await waitForDispatch(controller)
+        callback(.init(execution: current, payload: .diagnostic("after finish")))
+        #expect(!controller.state.eventLog.contains { $0.contains("after finish") })
+    }
+
     @Test func testImageBatchReportsAddedDuplicatesAndAllOverflow() throws {
         let controller = makeController(FakeDispatchService())
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -272,29 +294,31 @@ private final class FakeDispatchService: DispatchServicing {
     var throwPlatform: PlatformID?
     var verificationFailure: PlatformID?
     var platforms: [PlatformID] = []
-    var goals: [String] = []
+    var pause = false
+    var callbacks: [@MainActor @Sendable (ChannelEvent) -> Void] = []
+    var executions: [ChannelExecutionID] = []
+    var requests: [ChannelRequest] = []
     var bodies: [String] = []
     var tagSnapshots: [[String]] = []
     var assetSnapshots: [[String]] = []
-    func prepare(platform: PlatformID, goal: String, body: String, tags: [String], assets: [String], config: LLMConfig,
-                 onEvent: @escaping @Sendable (String) -> Void) async throws -> EgoBridge.Finish {
-        bodies.append(body); tagSnapshots.append(tags); assetSnapshots.append(assets)
-        return try await prepare(platform: platform, goal: goal, config: config, onEvent: onEvent)
-    }
-
-
-    func prepare(platform: PlatformID, goal: String, config: LLMConfig,
-                 onEvent: @escaping @Sendable (String) -> Void) async throws -> EgoBridge.Finish {
-        platforms.append(platform)
-        goals.append(goal)
+    func beginTask(id: UUID) async throws {}
+    func resumeControl() async throws {}
+    func capabilities(for platform: PlatformID) -> ChannelCapabilities? { ChannelRegistry.standard.adapter(for: platform)?.capabilities }
+    func execute(request: ChannelRequest, execution: ChannelExecutionID, command: ChannelCommand, config: LLMConfig,
+                 onEvent: @escaping @MainActor @Sendable (ChannelEvent) -> Void) async throws -> ChannelOutcome {
+        let platform = execution.platform
+        platforms.append(platform); requests.append(request)
+        callbacks.append(onEvent); executions.append(execution)
+        if pause { try await Task.sleep(for: .seconds(10)) }
+        bodies.append(request.body); tagSnapshots.append(request.tags); assetSnapshots.append(request.assets)
         if platform == throwPlatform { throw NSError(domain: "test", code: 1) }
-        return .init(status: statuses[platform] ?? "draftReady", message: "test")
-    }
-
-    func verifyDraft(platform: PlatformID, result: EgoBridge.Finish, title: String, body: String, imageCount: Int) async throws {
-        if platform == verificationFailure { throw NSError(domain: "test", code: 2, userInfo: [NSLocalizedDescriptionKey: "verification failed"]) }
-    }
-    func readReceipt(for platform: PlatformID) async throws -> String {
-        "https://example.com/post/1"
+        if platform == verificationFailure {
+            return .failed(.init(code: .verificationFailed, stage: .verifyingContent, detail: "verification failed", recovery: .inspectionRequired))
+        }
+        switch statuses[platform] ?? "draftReady" {
+        case "draftReady": return .readyForReview(message: "test")
+        case "needLogin": return .waitingForUser(.init(code: .loginRequired, stage: .checkingLogin, detail: "login", recovery: .loginRequired))
+        default: return .failed(.init(code: .executionFailed, stage: .openingEditor, detail: "failed", recovery: .retryAllowed))
+        }
     }
 }

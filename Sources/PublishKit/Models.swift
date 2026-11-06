@@ -3,7 +3,7 @@ import Foundation
 // MARK: - 平台
 
 /// 支持的平台。happy path 只实现 `simFixture`，其余为后续适配器预留。
-public enum PlatformID: String, Codable, CaseIterable, Identifiable {
+public enum PlatformID: String, Codable, CaseIterable, Identifiable, Sendable {
     case simFixture = "sim-fixture" // 内置模拟平台（本地 fixture 页面）
     case zhihu
     case xiaohongshu
@@ -26,7 +26,7 @@ public enum PlatformID: String, Codable, CaseIterable, Identifiable {
 
     /// Compatibility accessors backed by registered channel capabilities.
     public var isAvailable: Bool { ChannelRegistry.standard.adapter(for: self) != nil }
-    public var isArticle: Bool { ChannelRegistry.standard.adapter(for: self)?.capabilities.usesTitle == true }
+    public var isArticle: Bool { ChannelRegistry.standard.adapter(for: self)?.capabilities.isArticle == true }
     public var entryURL: String? { ChannelRegistry.standard.adapter(for: self)?.capabilities.entryURL }
 
 }
@@ -80,6 +80,7 @@ public struct PublishTask: Codable {
 // MARK: - 状态机
 
 public enum TargetPhase: String, Codable {
+    case cancelled
     case needLogin      // 需要用户登录
     case pending        // 未开始
     case preparing      // 适配器填充中

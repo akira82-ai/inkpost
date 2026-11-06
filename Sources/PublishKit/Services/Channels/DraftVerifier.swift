@@ -1,26 +1,37 @@
 import Foundation
 
+/// Checks actual content against the channel's explicit transformation of the complete request.
 enum DraftVerifier {
-    static func verify(bridge: EgoBridge, result: EgoBridge.Finish, title: String, body: String, imageCount: Int, usesTitle: Bool) async throws {
-        guard let target = result.bodyTarget else { throw EgoBridge.BridgeError.toolFailed("未提供可验证的正文位置，请手工检查") }
+    static func verify(bridge: EgoBridge, result: EgoBridge.Finish, request: ChannelRequest,
+                       expectedBody: String, usesTitle: Bool, tagsTarget: String? = nil, verifyImages: Bool = true) async throws {
+        func fail(_ detail: String) -> ChannelFailure {
+            .init(code: .verificationFailed, stage: .verifyingContent, detail: detail, recovery: .inspectionRequired)
+        }
+        guard let target = result.bodyTarget else { throw fail("未提供可验证的正文位置") }
         func read(_ selector: String) async throws -> [String: Any] {
             let raw = try await bridge.inspect(target: selector)
-            guard let object = try JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any], let value = object["value"] as? [String: Any] else { throw EgoBridge.BridgeError.toolFailed("无法校验页面内容") }
+            guard let object = try JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+                  let value = object["value"] as? [String: Any] else { throw fail("无法读取页面内容") }
             return value
         }
-        func normalized(_ text: String) -> String { text.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined() }
-        let content = try await read(target)
-        guard normalized(content["text"] as? String ?? "").contains(normalized(body)) else { throw EgoBridge.BridgeError.toolFailed("正文与提交内容不一致，请手工检查") }
-        if usesTitle {
-            guard let selector = result.titleTarget else { throw EgoBridge.BridgeError.toolFailed("缺少标题校验位置") }
-            let value = try await read(selector)
-            guard normalized(value["text"] as? String ?? "") == normalized(title) else { throw EgoBridge.BridgeError.toolFailed("标题未完整填写") }
+        func normalized(_ text: String) -> String {
+            text.replacingOccurrences(of: "\r\n", with: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        if imageCount > 0 {
-            guard let selector = result.imageTarget else { throw EgoBridge.BridgeError.toolFailed("缺少图片校验位置，请手工检查") }
-            let value = try await read(selector)
-            guard max(value["files"] as? Int ?? 0, value["images"] as? Int ?? 0) == imageCount else { throw EgoBridge.BridgeError.toolFailed("图片数量与提交内容不一致") }
+        let body = try await read(target)
+        guard normalized(body["text"] as? String ?? "") == normalized(expectedBody) else { throw fail("正文、标题合并内容或标签与提交内容不一致") }
+        if usesTitle {
+            guard let target = result.titleTarget else { throw fail("缺少标题校验位置") }
+            let title = try await read(target)
+            guard normalized(title["text"] as? String ?? "") == normalized(request.title) else { throw fail("标题未完整填写") }
+        }
+        if let tagsTarget {
+            let tags = try await read(tagsTarget)
+            guard normalized(tags["text"] as? String ?? "") == normalized(request.tagText) else { throw fail("标签未完整填写") }
+        }
+        if verifyImages && !request.assets.isEmpty {
+            guard let target = result.imageTarget else { throw fail("缺少图片校验位置") }
+            let images = try await read(target)
+            guard max(images["files"] as? Int ?? 0, images["images"] as? Int ?? 0) == request.assets.count else { throw fail("图片数量不一致") }
         }
     }
-
 }

@@ -23,10 +23,11 @@ public final class DispatchModel {
     // 运行状态
     public var overallPhase: TargetPhase = .pending
     public var eventLog: [String] = []
-    public var manualReceipt = ""
     public var errorMessage: String?
     public var notice: String?
     public var currentPlatform: PlatformID?
+    public var platformOutcomes: [PlatformID: ChannelOutcome] = [:]
+    public var platformEvents: [PlatformID: ChannelEvent] = [:]
     public var platformMessages: [PlatformID: String] = [:]
     public var taskPlatforms: [PlatformID] = []
     public var isHandingOff = false

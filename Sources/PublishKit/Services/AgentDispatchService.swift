@@ -3,39 +3,19 @@ import Foundation
 @MainActor
 public protocol DispatchServicing {
     func capabilities(for platform: PlatformID) -> ChannelCapabilities?
-    func prepare(platform: PlatformID, request: ChannelRequest, config: LLMConfig,
-                 onEvent: @escaping @Sendable (String) -> Void) async throws -> EgoBridge.Finish
-    func prepare(platform: PlatformID, goal: String, config: LLMConfig,
-                 onEvent: @escaping @Sendable (String) -> Void) async throws -> EgoBridge.Finish
-    func prepare(platform: PlatformID, goal: String, body: String, tags: [String], assets: [String], config: LLMConfig,
-                 onEvent: @escaping @Sendable (String) -> Void) async throws -> EgoBridge.Finish
-    func verifyDraft(platform: PlatformID, result: EgoBridge.Finish, title: String, body: String, imageCount: Int) async throws
+    func execute(request: ChannelRequest, execution: ChannelExecutionID, command: ChannelCommand, config: LLMConfig,
+                 onEvent: @escaping @MainActor @Sendable (ChannelEvent) -> Void) async throws -> ChannelOutcome
     var workspaceID: Int? { get }
-    func beginTask() async throws
+    func beginTask(id: UUID) async throws
     func handOff() async throws
     func resumeControl() async throws
-    func readReceipt(for platform: PlatformID) async throws -> String
-}
-
-public extension DispatchServicing {
-    func capabilities(for platform: PlatformID) -> ChannelCapabilities? { ChannelRegistry.standard.adapter(for: platform)?.capabilities }
-    func prepare(platform: PlatformID, request: ChannelRequest, config: LLMConfig,
-                 onEvent: @escaping @Sendable (String) -> Void) async throws -> EgoBridge.Finish {
-        try await prepare(platform: platform, goal: PlatformRules.goal(for: platform, title: request.title, html: request.html, plain: request.body, tags: request.tags, assets: request.assets), body: request.body, tags: request.tags, assets: request.assets, config: config, onEvent: onEvent)
-    }
-    func prepare(platform: PlatformID, goal: String, body: String, tags: [String], assets: [String], config: LLMConfig,
-                 onEvent: @escaping @Sendable (String) -> Void) async throws -> EgoBridge.Finish {
-        try await prepare(platform: platform, goal: goal, config: config, onEvent: onEvent)
-    }
-    var workspaceID: Int? { nil }
-    func verifyDraft(platform: PlatformID, result: EgoBridge.Finish, title: String, body: String, imageCount: Int) async throws {}
-    func beginTask() async throws {}
-    func handOff() async throws { throw EgoBridge.BridgeError.toolFailed("当前服务无法打开工作区") }
-    func resumeControl() async throws {}
 }
 
 @MainActor
 public final class AgentDispatchService: DispatchServicing {
+    private var taskID: UUID?
+    private var sessions: [PlatformID: (request: ChannelRequest, outcome: ChannelOutcome)] = [:]
+    private var activeAttempts: [PlatformID: UUID] = [:]
     private var bridges: [PlatformID: EgoBridge] = [:]
     private var spaceName = ""
     private var spaceID: Int?
@@ -47,11 +27,12 @@ public final class AgentDispatchService: DispatchServicing {
     public init(registryFactory: @escaping () -> ChannelRegistry = { .standard }) {
         makeRegistry = registryFactory; registry = registryFactory()
     }
-    init(workspaceName: String) { registry = .standard; makeRegistry = { .standard }; spaceName = workspaceName }
     init(registryFactory: @escaping () -> ChannelRegistry, bridgeFactory: @escaping (PlatformID) async throws -> EgoBridge) {
         makeRegistry = registryFactory; registry = registryFactory(); self.bridgeFactory = bridgeFactory
     }
-    public func beginTask() async throws {
+    public func beginTask(id: UUID) async throws {
+        guard activeAttempts.isEmpty else { throw ChannelFailure(code: .invalidCommand, stage: .validatingRequest, detail: "仍有渠道执行中", recovery: .notRecoverable) }
+        taskID = id; sessions = [:]
         spaceName = "inkpost \(UUID().uuidString)"
         bridges = [:]; spaceID = nil; handedOff = false
         registry = makeRegistry()
@@ -68,21 +49,16 @@ public final class AgentDispatchService: DispatchServicing {
         handedOff = false
     }
 
-    public func prepare(platform: PlatformID, goal: String, config: LLMConfig,
-                        onEvent: @escaping @Sendable (String) -> Void) async throws -> EgoBridge.Finish {
-        let adapter = try requiredAdapter(platform)
-        guard adapter.capabilities.requiresLLM else { throw EgoBridge.BridgeError.toolFailed("此渠道必须使用结构化正文和图片任务入口") }
-        return try await prepare(platform: platform, request: .init(title: "", body: "", legacyGoal: goal), config: config, onEvent: onEvent)
-    }
-
     public func capabilities(for platform: PlatformID) -> ChannelCapabilities? { registry.adapter(for: platform)?.capabilities }
     private func requiredAdapter(_ platform: PlatformID) throws -> any ChannelAdapter {
-        guard let adapter = registry.adapter(for: platform) else { throw EgoBridge.BridgeError.toolFailed("渠道未注册：\(platform.rawValue)") }
+        guard let adapter = registry.adapter(for: platform) else {
+            throw ChannelFailure(code: .invalidCommand, stage: .validatingRequest, detail: "渠道未注册：\(platform.rawValue)", recovery: .notRecoverable)
+        }
         return adapter
     }
 
     private func bridge(for platform: PlatformID) async throws -> EgoBridge {
-        if spaceName.isEmpty { try await beginTask() }
+        guard taskID != nil else { throw ChannelFailure(code: .invalidCommand, stage: .validatingRequest, detail: "任务尚未开始", recovery: .notRecoverable) }
         let bridge: EgoBridge
         if let existing = bridges[platform] { bridge = existing }
         else if let bridgeFactory {
@@ -100,39 +76,54 @@ public final class AgentDispatchService: DispatchServicing {
         return bridge
     }
 
-    public func prepare(platform: PlatformID, goal: String, body: String, tags: [String], assets: [String], config: LLMConfig,
-                        onEvent: @escaping @Sendable (String) -> Void) async throws -> EgoBridge.Finish {
-        try await prepare(platform: platform, request: .init(title: "", body: body, tags: tags, assets: assets, legacyGoal: goal), config: config, onEvent: onEvent)
-    }
-
-    public func prepare(platform: PlatformID, request: ChannelRequest, config: LLMConfig,
-                        onEvent: @escaping @Sendable (String) -> Void) async throws -> EgoBridge.Finish {
-        if spaceName.isEmpty { try await beginTask() }
-        let adapter = try requiredAdapter(platform)
-        guard request.assets.count <= adapter.capabilities.maximumImages else {
-            throw EgoBridge.BridgeError.toolFailed("图片超过渠道允许的数量（\(adapter.capabilities.maximumImages) 张）")
+    public func execute(request: ChannelRequest, execution: ChannelExecutionID, command: ChannelCommand, config: LLMConfig,
+                        onEvent: @escaping @MainActor @Sendable (ChannelEvent) -> Void) async throws -> ChannelOutcome {
+        try Task.checkCancellation()
+        guard taskID == execution.taskID, activeAttempts[execution.platform] == nil else {
+            return .failed(.init(code: .invalidCommand, stage: .validatingRequest, detail: "任务不匹配或渠道正在执行", recovery: .notRecoverable))
         }
-        let bridge = try await bridge(for: platform)
-        return try await adapter.prepare(request: request, bridge: bridge, config: config, onEvent: onEvent)
-    }
-
-    /// GUI 与 CLI 共用的 Agent 执行入口，支持脚本化模型验证。
-    public static func run(llm: any LLMSession, bridge: EgoBridge, goal: String,
-                           onEvent: @escaping @Sendable (String) -> Void) async throws -> EgoBridge.Finish {
-        let loop = AgentLoop(llm: llm, bridge: bridge, maxSteps: 20)
-        loop.onEvent = onEvent
-        return try await loop.run(goal: goal)
-    }
-
-    public func verifyDraft(platform: PlatformID, result: EgoBridge.Finish, title: String, body: String, imageCount: Int) async throws {
-        guard let bridge = bridges[platform] else { throw EgoBridge.BridgeError.toolFailed("没有可校验的渠道页面") }
-        try await requiredAdapter(platform).verify(bridge: bridge, result: result, title: title, body: body, imageCount: imageCount)
-    }
-
-    public func readReceipt(for platform: PlatformID) async throws -> String {
-        guard let bridge = bridges[platform] else {
-            throw EgoBridge.BridgeError.toolFailed("没有可读取的草稿会话")
+        let platform = execution.platform
+        let previous = sessions[platform]
+        guard command == .prepare ? previous == nil : (previous?.request == request && previous?.outcome.canResume == true) else {
+            return .failed(.init(code: .invalidCommand, stage: .validatingRequest, detail: "无法以当前内容重复开始或恢复此渠道", recovery: .notRecoverable))
         }
-        return try await requiredAdapter(platform).readReceipt(bridge: bridge)
+        activeAttempts[platform] = execution.attemptID
+        defer { if taskID == execution.taskID { activeAttempts[platform] = nil } }
+        onEvent(.init(execution: execution, payload: .stage(.validatingRequest)))
+        let context: ChannelExecutionContext
+        do {
+            let adapter = try requiredAdapter(platform)
+            try PlatformRules.validate(request, capabilities: adapter.capabilities)
+            if adapter.capabilities.requiresLLM && config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                throw ChannelFailure(code: .configurationMissing, stage: .validatingRequest, detail: "缺少模型接口配置", recovery: .retryAllowed)
+            }
+            onEvent(.init(execution: execution, payload: .stage(.openingEditor)))
+            let bridge = try await bridge(for: platform)
+            guard taskID == execution.taskID else { throw CancellationError() }
+            context = ChannelExecutionContext(execution: execution, command: command, bridge: bridge, config: config, onEvent: onEvent)
+        } catch {
+            if error is CancellationError || Task.isCancelled { throw CancellationError() }
+            let failure = (error as? ChannelFailure) ?? .init(code: .executionFailed, stage: .openingEditor, detail: error.localizedDescription, recovery: .retryAllowed)
+            let outcome = ChannelOutcome.failed(failure)
+            if taskID == execution.taskID { sessions[platform] = (request, outcome) }
+            return outcome
+        }
+        defer { context.finish() }
+        var outcome: ChannelOutcome
+        do {
+            outcome = try await requiredAdapter(platform).execute(request: request, context: context)
+            try Task.checkCancellation()
+        } catch {
+            if error is CancellationError || Task.isCancelled {
+                if taskID == execution.taskID {
+                    sessions[platform] = (request, .failed(.init(code: .operationResultUnknown, stage: context.stage, detail: "执行已取消，请检查页面后继续", recovery: .inspectionRequired)))
+                }
+                throw CancellationError()
+            }
+            outcome = .failed(context.mapFailure(error))
+        }
+        guard taskID == execution.taskID else { throw CancellationError() }
+        sessions[platform] = (request, outcome)
+        return outcome
     }
 }

@@ -33,7 +33,7 @@ struct DispatchControllerTests {
         #expect(controller.state.platformPhase[.zhihu] == .awaitingConfirm)
         #expect(controller.state.platformPhase[.jike] == .needLogin)
         #expect(controller.state.platformPhase[.x] == .failed)
-        #expect(service.goals[0].contains("https://zhuanlan.zhihu.com/write"))
+        #expect(service.goals[0].contains("https://www.zhihu.com/"))
         #expect(service.goals[0].contains("#swift #macOS"))
         #expect(service.goals[1].contains("https://web.okjike.com"))
         #expect(service.goals[2].contains("https://x.com/compose/post"))
@@ -47,13 +47,64 @@ struct DispatchControllerTests {
         try await waitForDispatch(controller)
         #expect(controller.state.overallPhase == .failed)
         let original = service.goals.last
+        let originalBody = service.bodies.last
+        let originalTags = service.tagSnapshots.last
+        let originalAssets = service.assetSnapshots.last
         controller.state.markdown = "Changed during pause"
+        controller.state.tagsText = "#changed"
+        controller.state.assetPaths = ["/tmp/changed.png"]
         service.statuses[.x] = "draftReady"
         controller.resume(.x)
         try await waitForDispatch(controller)
         #expect(service.platforms == [.zhihu, .jike, .x, .x])
         #expect(service.goals.last == original)
+        #expect(service.bodies.last == originalBody)
+        #expect(service.tagSnapshots.last == originalTags)
+        #expect(service.assetSnapshots.last == originalAssets)
         #expect(controller.state.overallPhase == .awaitingConfirm)
+    }
+
+    @Test func testZhihuDeterministicFlowDoesNotRequireLLMKeyOrTitle() {
+        let controller = makeController(FakeDispatchService())
+        controller.state.selectedPlatforms = [.zhihu]
+        controller.state.apiKey = ""
+        controller.state.title = ""
+        #expect(controller.canDispatch)
+        controller.state.selectedPlatforms = [.zhihu, .x]
+        #expect(!controller.canDispatch)
+    }
+
+    @Test func testZhihuRejectsUnstructuredAgentEntry() async throws {
+        let service = AgentDispatchService()
+        do {
+            _ = try await service.prepare(platform: .zhihu, goal: "unstructured", config: .init(baseURL: "https://unused.invalid", apiKey: "", model: "unused"), onEvent: { _ in })
+            Issue.record("Unstructured Zhihu task unexpectedly accepted")
+        } catch {
+            #expect(error.localizedDescription.contains("结构化"))
+            #expect(service.workspaceID == nil)
+        }
+    }
+
+    @Test func testZhihuRejectsArticleNavigationBeforeBrowserExecution() async throws {
+        let bridge = try EgoBridge(spaceName: "unused", engine: EgoLiteEngine(binaryPath: "/usr/bin/false"))
+        for url in ["https://zhuanlan.zhihu.com/write", "https://www.zhihu.com/creator", "https://www.zhihu.com/?redirect=article"] {
+            do {
+                _ = try await ZhihuChannelAdapter.navigate(bridge: bridge, url: url)
+                Issue.record("Unexpected navigation: \(url)")
+            } catch {
+                #expect(error.localizedDescription.contains("知乎想法仅允许打开首页"))
+            }
+        }
+    }
+
+    @Test func testZhihuUsesThoughtComposerInsteadOfArticle() {
+        #expect(PlatformID.zhihu.entryURL == "https://www.zhihu.com/")
+        #expect(!PlatformID.zhihu.isArticle)
+        #expect(PlatformID.simFixture.isArticle)
+        let goal = PlatformRules.goal(for: .zhihu, title: "Title", html: "", plain: "Body", tags: ["测试"], assets: [])
+        #expect(goal.contains("知乎想法"))
+        #expect(!goal.contains("zhuanlan.zhihu.com"))
+        #expect(goal.contains("不把输入标题自动并入正文"))
     }
 
     @Test func testFullBodyAndHTMLReachPlatformGoal() {
@@ -222,6 +273,15 @@ private final class FakeDispatchService: DispatchServicing {
     var verificationFailure: PlatformID?
     var platforms: [PlatformID] = []
     var goals: [String] = []
+    var bodies: [String] = []
+    var tagSnapshots: [[String]] = []
+    var assetSnapshots: [[String]] = []
+    func prepare(platform: PlatformID, goal: String, body: String, tags: [String], assets: [String], config: LLMConfig,
+                 onEvent: @escaping @Sendable (String) -> Void) async throws -> EgoBridge.Finish {
+        bodies.append(body); tagSnapshots.append(tags); assetSnapshots.append(assets)
+        return try await prepare(platform: platform, goal: goal, config: config, onEvent: onEvent)
+    }
+
 
     func prepare(platform: PlatformID, goal: String, config: LLMConfig,
                  onEvent: @escaping @Sendable (String) -> Void) async throws -> EgoBridge.Finish {

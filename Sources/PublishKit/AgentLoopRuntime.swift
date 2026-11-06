@@ -212,7 +212,7 @@ public final class AgentLoop {
     func execute(_ call: ToolCall) async -> String {
         let name = call.function.name
         let args = parse(call.function.arguments)
-        onEvent?("▸ \(name)")
+        onEvent?(name == "navigate" ? "▸ navigate：\(args["url"] as? String ?? "缺少 URL")" : "▸ \(name)")
         do {
             let payload: String
             switch name {
@@ -241,6 +241,7 @@ public final class AgentLoop {
             // 快照可能很大，压缩空白
             return payload.replacingOccurrences(of: "\n{2,}", with: "\n", options: .regularExpression)
         } catch {
+            onEvent?("✗ \(name)：\(error.localizedDescription)")
             // 工具失败也回喂给模型，让它自行调整（这正是 agent 相对死脚本的价值）
             return "{\"ok\":false,\"error\":\"\(error.localizedDescription.replacingOccurrences(of: "\"", with: "'"))\"}"
         }

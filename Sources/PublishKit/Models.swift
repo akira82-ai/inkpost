@@ -24,26 +24,11 @@ public enum PlatformID: String, Codable, CaseIterable, Identifiable {
         }
     }
 
-    /// 当前可分发的平台（真实平台走同一套工具，仅入口与页面认知不同）
-    public var isAvailable: Bool {
-        switch self {
-        case .simFixture, .zhihu, .jike, .x: return true
-        default: return false
-        }
-    }
+    /// Compatibility accessors backed by registered channel capabilities.
+    public var isAvailable: Bool { ChannelRegistry.standard.adapter(for: self) != nil }
+    public var isArticle: Bool { ChannelRegistry.standard.adapter(for: self)?.capabilities.usesTitle == true }
+    public var entryURL: String? { ChannelRegistry.standard.adapter(for: self)?.capabilities.entryURL }
 
-    /// 内容形态：文章（标题+富文本）或动态（纯文本，可带图）
-    public var isArticle: Bool { self == .zhihu || self == .simFixture }
-
-    /// 真实平台的创作页入口（simFixture 的入口在运行时由 bundle 解析）
-    public var entryURL: String? {
-        switch self {
-        case .zhihu: return "https://zhuanlan.zhihu.com/write"
-        case .jike: return "https://web.okjike.com"
-        case .x: return "https://x.com/compose/post"
-        default: return nil
-        }
-    }
 }
 
 // MARK: - 内容与任务协议（Swift ↔ 适配器脚本 共享的 JSON 契约）

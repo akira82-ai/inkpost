@@ -1,6 +1,6 @@
 # 墨驿 Inkpost
 
-当前版本：`0.3.0`
+当前版本：`0.4.0`
 
 > 「墨」承文脉，「驿」管送达——内容驿站：一次投递，各平台分发。
 
@@ -82,6 +82,8 @@ Sources/flowctl/        CLI（agent-demo / prepare / finalize / cleanup）
 
 采用适配 SwiftUI 的 MVC + Services：View → Controller → Model / Services，View 观察 Model 自动刷新。所有 UI 都放在 Views 中；Controller 不依赖 SwiftUI 或 AppKit，也不实现浏览器脚本、HTTP 或文件读写。平台任务状态统一使用 PublishKit.TargetPhase。
 
+知乎想法使用固定流程：打开首页「分享此刻的想法」，填写完整正文及标签，再将应用图片逐张复制为系统剪贴板 PNG，通过 ego Lite 的 ⌘V 粘贴；每张确认上传完成后再继续。按附件卡片核对数量，仅在应用仍拥有剪贴板变更计数时恢复原内容，保留用户期间的新复制；同一任务恢复不会再次插入已确认的图片。结果不确定时停止并提示检查，最终由用户亲手发布；不使用独立标题，不进入文章页，也不保证平台已持久保存草稿。
+
 GUI 与 CLI 的 agent-demo 共用 AgentDispatchService.run，Controller 可注入 DispatchServicing 替身进行离线验证。现有确定性 prepare/finalize CLI 适配器保留。帖子持久化尚未接入；简约模式开发已修复正文截断、统一状态，并把模型任意 JS 工具替换为固定只读检查。
 
 验证：`swift build`、`swift test`（Swift Testing；CLT 环境补充命令见下文），以及安装 ego Lite 后的 `swift run flowctl agent-demo`。如果旧缓存记录了仓库改名前的路径，可使用 `--scratch-path /tmp/inkpost-mvc-build` 构建与测试，无需删除原缓存。
@@ -119,3 +121,14 @@ swift test --disable-xctest --scratch-path /tmp/inkpost-compact-build \
 项目改名前遗留的 `.build` 缓存可能引用旧目录；使用新的 `--scratch-path`，无须删除现有缓存。浏览器冒烟：`swift run --scratch-path /tmp/inkpost-compact-build flowctl compact-smoke`，验证同 Space 双 Page、正文与图片，不点击发布；`agent-demo` 保留模拟人工确认的历史管道演示。
 
 点击「已填好」成功交还 ego 工作区后，编辑区恢复初始并保留渠道选择；上一份内容、图片和 Space 编号可在投递记录中查看。记录仅在本次运行内保留，不追踪发布结果；交接失败或存在未完成渠道时不清空。下一次填写使用新的 Space。
+
+
+仅选择知乎想法时无需 API Key 或标题；即刻和 X 仍需模型配置，X 最多 4 张图片。完整工作台提供可展开的执行日志与渠道错误详情。
+
+### 渠道适配器（#9）
+
+`Services/Channels/` 按渠道隔离知乎、即刻、X 和模拟平台。`ChannelAdapter` 统一接收 `ChannelRequest`（标题、完整正文、HTML、标签、素材），声明标题／模型配置需求、图片上限和入口，并负责准备、校验和恢复状态。知乎保留确定性想法流程，其余渠道复用 Agent 执行器。
+
+`AgentDispatchService` 通过 `ChannelRegistry` 查找适配器，负责一个任务的 Space 和各渠道 Page，不包含平台步骤。注册表随新任务创建，恢复时复用原适配器与 Page；Controller 根据能力声明进行启动校验。`PlatformRules` 和历史 prepare 重载保留为兼容入口，生产 Controller 不再构造平台提示词。通用 `EgoBridge` 不含知乎分支，PNG 剪贴板保存与有条件恢复由 `ImageClipboardSession` 复用。
+
+新增渠道：实现适配器并注册，再补充平台标识及展示信息；无需修改核心调度算法。适配器测试使用注入的 Page 工厂，无浏览器／API Key 验证结构化输入、独立失败、页面复用、新任务隔离和能力限制。真实平台仍只填好内容，不自动发布。

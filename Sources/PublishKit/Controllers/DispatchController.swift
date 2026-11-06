@@ -10,7 +10,7 @@ public final class DispatchController {
     @ObservationIgnored private let settings: DispatchSettings
     @ObservationIgnored private let assets = AssetService()
     @ObservationIgnored private let notifier = CompletionNotifier()
-    @ObservationIgnored private var goals: [PlatformID: String] = [:]
+    @ObservationIgnored private var draftRequest: ChannelRequest?
     @ObservationIgnored private var draftTitle = ""
     @ObservationIgnored private var draftBody = ""
     @ObservationIgnored private var draftImageCount = 0
@@ -27,8 +27,12 @@ public final class DispatchController {
         self.state.selectedPlatforms = settings.selectedPlatforms()
     }
 
+    public var requiresModelConfiguration: Bool {
+        state.selectedPlatforms.contains { service.capabilities(for: $0)?.requiresLLM != false }
+    }
+
     public var canDispatch: Bool {
-        state.overallPhase == .pending && !state.isHandingOff && !state.selectedPlatforms.isEmpty && (!state.selectedPlatforms.contains(where: { $0.isArticle }) || !state.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) && !state.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !state.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        state.overallPhase == .pending && !state.isHandingOff && !state.selectedPlatforms.isEmpty && (!state.selectedPlatforms.contains(where: { service.capabilities(for: $0)?.usesTitle == true }) || !state.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) && !state.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (!requiresModelConfiguration || !state.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 
     public func saveConfig() {
@@ -110,7 +114,7 @@ public final class DispatchController {
         state.overallPhase = .preparing
         let token = generation
         runningTask = Task {
-            do { try await service.resumeControl(); try await runOnePlatform(platform, html: "", plain: "", tags: [], assets: []) }
+            do { try await service.resumeControl(); try await runOnePlatform(platform) }
             catch { guard generation == token else { return }; state.platformPhase[platform] = .failed; state.platformMessages[platform] = error.localizedDescription }
             guard generation == token else { return }
             finishTask()
@@ -148,7 +152,7 @@ public final class DispatchController {
             .filter { !$0.isEmpty }
         let assets = state.assetPaths
 
-        goals = Dictionary(uniqueKeysWithValues: platforms.map { ($0, PlatformRules.goal(for: $0, title: state.title, html: html, plain: plain, tags: tags, assets: assets)) })
+        draftRequest = ChannelRequest(title: state.title, body: plain, html: html, tags: tags, assets: assets)
         runningTask = Task {
             await notifier.prepare()
             do { try await service.beginTask() } catch {
@@ -159,7 +163,7 @@ public final class DispatchController {
             for p in platforms {
                 if Task.isCancelled || token != generation { return }
                 do {
-                    try await runOnePlatform(p, html: html, plain: plain, tags: tags, assets: assets)
+                    try await runOnePlatform(p)
                 } catch {
                     guard generation == token else { return }
                     state.platformPhase[p] = .failed
@@ -175,11 +179,11 @@ public final class DispatchController {
         }
     }
 
-    func runOnePlatform(_ p: PlatformID, html: String, plain: String, tags: [String], assets: [String]) async throws {
+    func runOnePlatform(_ p: PlatformID) async throws {
         state.currentPlatform = p
         state.platformPhase[p] = .preparing
         let result = try await service.prepare(platform: p,
-            goal: goals[p] ?? "",
+            request: draftRequest!,
             config: taskConfig!,
             onEvent: { [weak self] msg in
                 Task { @MainActor in self?.log("【\(p.title)】\(msg)") }
@@ -236,7 +240,7 @@ public final class DispatchController {
         state.currentPlatform = nil
         state.platformMessages = [:]
         state.taskPlatforms = []
-        goals = [:]
+        draftRequest = nil
         taskConfig = nil
         state.overallPhase = .pending
         state.errorMessage = nil

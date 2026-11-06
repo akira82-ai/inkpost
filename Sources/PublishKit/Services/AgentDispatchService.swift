@@ -2,7 +2,12 @@ import Foundation
 
 @MainActor
 public protocol DispatchServicing {
+    func capabilities(for platform: PlatformID) -> ChannelCapabilities?
+    func prepare(platform: PlatformID, request: ChannelRequest, config: LLMConfig,
+                 onEvent: @escaping @Sendable (String) -> Void) async throws -> EgoBridge.Finish
     func prepare(platform: PlatformID, goal: String, config: LLMConfig,
+                 onEvent: @escaping @Sendable (String) -> Void) async throws -> EgoBridge.Finish
+    func prepare(platform: PlatformID, goal: String, body: String, tags: [String], assets: [String], config: LLMConfig,
                  onEvent: @escaping @Sendable (String) -> Void) async throws -> EgoBridge.Finish
     func verifyDraft(platform: PlatformID, result: EgoBridge.Finish, title: String, body: String, imageCount: Int) async throws
     var workspaceID: Int? { get }
@@ -13,6 +18,15 @@ public protocol DispatchServicing {
 }
 
 public extension DispatchServicing {
+    func capabilities(for platform: PlatformID) -> ChannelCapabilities? { ChannelRegistry.standard.adapter(for: platform)?.capabilities }
+    func prepare(platform: PlatformID, request: ChannelRequest, config: LLMConfig,
+                 onEvent: @escaping @Sendable (String) -> Void) async throws -> EgoBridge.Finish {
+        try await prepare(platform: platform, goal: PlatformRules.goal(for: platform, title: request.title, html: request.html, plain: request.body, tags: request.tags, assets: request.assets), body: request.body, tags: request.tags, assets: request.assets, config: config, onEvent: onEvent)
+    }
+    func prepare(platform: PlatformID, goal: String, body: String, tags: [String], assets: [String], config: LLMConfig,
+                 onEvent: @escaping @Sendable (String) -> Void) async throws -> EgoBridge.Finish {
+        try await prepare(platform: platform, goal: goal, config: config, onEvent: onEvent)
+    }
     var workspaceID: Int? { nil }
     func verifyDraft(platform: PlatformID, result: EgoBridge.Finish, title: String, body: String, imageCount: Int) async throws {}
     func beginTask() async throws {}
@@ -26,11 +40,21 @@ public final class AgentDispatchService: DispatchServicing {
     private var spaceName = ""
     private var spaceID: Int?
     private var handedOff = false
+    private var registry: ChannelRegistry
+    private let makeRegistry: () -> ChannelRegistry
+    private var bridgeFactory: ((PlatformID) async throws -> EgoBridge)?
     public var workspaceID: Int? { spaceID }
-    public init() {}
+    public init(registryFactory: @escaping () -> ChannelRegistry = { .standard }) {
+        makeRegistry = registryFactory; registry = registryFactory()
+    }
+    init(workspaceName: String) { registry = .standard; makeRegistry = { .standard }; spaceName = workspaceName }
+    init(registryFactory: @escaping () -> ChannelRegistry, bridgeFactory: @escaping (PlatformID) async throws -> EgoBridge) {
+        makeRegistry = registryFactory; registry = registryFactory(); self.bridgeFactory = bridgeFactory
+    }
     public func beginTask() async throws {
         spaceName = "inkpost \(UUID().uuidString)"
         bridges = [:]; spaceID = nil; handedOff = false
+        registry = makeRegistry()
     }
     public func handOff() async throws {
         guard let id = spaceID else { throw EgoBridge.BridgeError.toolFailed("还没有可打开的浏览器工作区") }
@@ -46,10 +70,25 @@ public final class AgentDispatchService: DispatchServicing {
 
     public func prepare(platform: PlatformID, goal: String, config: LLMConfig,
                         onEvent: @escaping @Sendable (String) -> Void) async throws -> EgoBridge.Finish {
+        let adapter = try requiredAdapter(platform)
+        guard adapter.capabilities.requiresLLM else { throw EgoBridge.BridgeError.toolFailed("此渠道必须使用结构化正文和图片任务入口") }
+        return try await prepare(platform: platform, request: .init(title: "", body: "", legacyGoal: goal), config: config, onEvent: onEvent)
+    }
+
+    public func capabilities(for platform: PlatformID) -> ChannelCapabilities? { registry.adapter(for: platform)?.capabilities }
+    private func requiredAdapter(_ platform: PlatformID) throws -> any ChannelAdapter {
+        guard let adapter = registry.adapter(for: platform) else { throw EgoBridge.BridgeError.toolFailed("渠道未注册：\(platform.rawValue)") }
+        return adapter
+    }
+
+    private func bridge(for platform: PlatformID) async throws -> EgoBridge {
         if spaceName.isEmpty { try await beginTask() }
         let bridge: EgoBridge
         if let existing = bridges[platform] { bridge = existing }
-        else {
+        else if let bridgeFactory {
+            bridge = try await bridgeFactory(platform)
+            bridges[platform] = bridge
+        } else {
             let engine = try EgoLiteEngine()
             let name = String(data: try JSONSerialization.data(withJSONObject: [spaceName]), encoding: .utf8)!
             let result = try await engine.runRaw(script: "const task = await taskSpace(\(name)[0]); const page = \(bridges.isEmpty ? "task.page(\"p1\")" : "await task.newPage()"); cliLog(JSON.stringify({label:page.label,spaceID:task.spaceId}));")
@@ -58,9 +97,23 @@ public final class AgentDispatchService: DispatchServicing {
             bridge = try EgoBridge(spaceName: spaceName, engine: engine, pageLabel: label)
             bridges[platform] = bridge
         }
-        onEvent("调用 \(config.model) @ \(config.baseURL)")
-        return try await Self.run(llm: OpenAICompatClient(config: config), bridge: bridge,
-                                  goal: "\(goal)\n\n恢复要求：先检查现有页面与内容，已填写的标题、正文和图片不要重复插入；需要时修改原字段。", onEvent: onEvent)
+        return bridge
+    }
+
+    public func prepare(platform: PlatformID, goal: String, body: String, tags: [String], assets: [String], config: LLMConfig,
+                        onEvent: @escaping @Sendable (String) -> Void) async throws -> EgoBridge.Finish {
+        try await prepare(platform: platform, request: .init(title: "", body: body, tags: tags, assets: assets, legacyGoal: goal), config: config, onEvent: onEvent)
+    }
+
+    public func prepare(platform: PlatformID, request: ChannelRequest, config: LLMConfig,
+                        onEvent: @escaping @Sendable (String) -> Void) async throws -> EgoBridge.Finish {
+        if spaceName.isEmpty { try await beginTask() }
+        let adapter = try requiredAdapter(platform)
+        guard request.assets.count <= adapter.capabilities.maximumImages else {
+            throw EgoBridge.BridgeError.toolFailed("图片超过渠道允许的数量（\(adapter.capabilities.maximumImages) 张）")
+        }
+        let bridge = try await bridge(for: platform)
+        return try await adapter.prepare(request: request, bridge: bridge, config: config, onEvent: onEvent)
     }
 
     /// GUI 与 CLI 共用的 Agent 执行入口，支持脚本化模型验证。
@@ -72,37 +125,14 @@ public final class AgentDispatchService: DispatchServicing {
     }
 
     public func verifyDraft(platform: PlatformID, result: EgoBridge.Finish, title: String, body: String, imageCount: Int) async throws {
-        guard let bridge = bridges[platform], let target = result.bodyTarget else { throw EgoBridge.BridgeError.toolFailed("未提供可验证的正文位置，请手工检查") }
-        func read(_ selector: String) async throws -> [String: Any] {
-            let raw = try await bridge.inspect(target: selector)
-            guard let object = try JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any], let value = object["value"] as? [String: Any] else { throw EgoBridge.BridgeError.toolFailed("无法校验页面内容") }
-            return value
-        }
-        func normalized(_ text: String) -> String { text.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined() }
-        let content = try await read(target)
-        guard normalized(content["text"] as? String ?? "").contains(normalized(body)) else { throw EgoBridge.BridgeError.toolFailed("正文与提交内容不一致，请手工检查") }
-        if platform.isArticle {
-            guard let selector = result.titleTarget else { throw EgoBridge.BridgeError.toolFailed("缺少标题校验位置") }
-            let value = try await read(selector)
-            guard normalized(value["text"] as? String ?? "") == normalized(title) else { throw EgoBridge.BridgeError.toolFailed("标题未完整填写") }
-        }
-        if imageCount > 0 {
-            guard let selector = result.imageTarget else { throw EgoBridge.BridgeError.toolFailed("缺少图片校验位置，请手工检查") }
-            let value = try await read(selector)
-            guard max(value["files"] as? Int ?? 0, value["images"] as? Int ?? 0) == imageCount else { throw EgoBridge.BridgeError.toolFailed("图片数量与提交内容不一致") }
-        }
+        guard let bridge = bridges[platform] else { throw EgoBridge.BridgeError.toolFailed("没有可校验的渠道页面") }
+        try await requiredAdapter(platform).verify(bridge: bridge, result: result, title: title, body: body, imageCount: imageCount)
     }
 
     public func readReceipt(for platform: PlatformID) async throws -> String {
         guard let bridge = bridges[platform] else {
             throw EgoBridge.BridgeError.toolFailed("没有可读取的草稿会话")
         }
-        let raw = try await bridge.evaluate(
-            js: "document.querySelector('#receipt') && document.querySelector('#receipt').dataset.url || ''")
-        guard let data = raw.data(using: .utf8),
-              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw EgoBridge.BridgeError.toolFailed("回执格式无效")
-        }
-        return object["value"] as? String ?? ""
+        return try await requiredAdapter(platform).readReceipt(bridge: bridge)
     }
 }

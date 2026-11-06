@@ -97,17 +97,10 @@ struct ContentView: View {
                     }.frame(width: 270)
                 }
                 Rectangle().fill(InkStyle.line).frame(height: 1).padding(.top, 24).padding(.bottom, 20)
-                HStack(alignment: .center, spacing: 24) {
-                    VStack(alignment: .leading, spacing: 5) {
-                        if model.overallPhase == .pending {
-                            Text("准备好，即可出发").foregroundStyle(InkStyle.ink)
-                            Text("各渠道独立执行，遇到登录可稍后继续").foregroundStyle(InkStyle.muted)
-                        } else { DispatchStatus(model: model, controller: controller) }
-                    }.font(InkStyle.font(11)).frame(maxWidth: .infinity, alignment: .leading)
-                    DispatchAction(model: model, controller: controller).frame(width: 245)
-                }
-                Text("填写完成后，请到浏览器检查内容并亲手点击发布。")
-                    .font(InkStyle.font(10)).foregroundStyle(InkStyle.placeholder).padding(.top, 18)
+                VStack(spacing: 9) {
+                    DispatchAction(model: model, controller: controller)
+                    DispatchStatus(model: model)
+                }.frame(maxWidth: .infinity)
                 if model.overallPhase == .awaitingConfirm {
                     Button("开始新一份", action: controller.newDraft).buttonStyle(.plain).font(InkStyle.font(11)).padding(.top, 12)
                 } else if model.overallPhase == .failed {
@@ -134,6 +127,11 @@ struct ContentView: View {
                     }
                     Text(channelState(channel)).font(InkStyle.font(10)).foregroundStyle(channel.available ? InkStyle.muted : InkStyle.warning)
                         .padding(.leading, 39)
+                    if let platform = channel.platform, [.failed, .needLogin].contains(model.platformPhase[platform] ?? .pending) {
+                        Button(model.platformPhase[platform] == .needLogin ? "我已登录，继续" : "已处理，继续") { controller.resume(platform) }
+                            .buttonStyle(.plain).font(InkStyle.font(10)).padding(.leading, 39)
+                            .disabled(model.overallPhase == .preparing)
+                    }
                 }.padding(13).frame(maxWidth: .infinity, alignment: .leading).background(Color(hex: 0xFFFEFB), in: RoundedRectangle(cornerRadius: 9))
                     .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(InkStyle.line))
             }
@@ -152,14 +150,20 @@ struct ContentView: View {
     private var taskRecord: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("本次投递").font(.custom("Songti SC", size: 26))
-            Text("这里只显示本次运行记录，尚不保存历史投递。")
-                .font(InkStyle.font(12)).foregroundStyle(InkStyle.muted)
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    if model.eventLog.isEmpty { Text("开始填写后，各渠道的执行过程会出现在这里。").foregroundStyle(InkStyle.muted) }
-                    ForEach(Array(model.eventLog.enumerated()), id: \.offset) { _, line in Text(line).textSelection(.enabled) }
-                }.font(InkStyle.font(11)).frame(maxWidth: .infinity, alignment: .leading)
+            if model.taskPlatforms.isEmpty {
+                Text("开始填写后，这里会显示各渠道的填写状态。")
+                    .font(InkStyle.font(12)).foregroundStyle(InkStyle.muted)
+            } else {
+                DispatchStatus(model: model)
+                ForEach(model.taskPlatforms) { platform in
+                    HStack {
+                        Text(platform.title)
+                        Spacer()
+                        Text(model.platformPhase[platform] == .awaitingConfirm ? "已填好" : model.platformPhase[platform] == .preparing ? "正在填写" : model.platformPhase[platform] == .pending ? "等待填写" : "需要您手工处理")
+                    }.font(InkStyle.font(12)).padding(.vertical, 8)
+                }
             }
+
         }.padding(32).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
     private var channels: some View {

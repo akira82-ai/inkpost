@@ -76,41 +76,45 @@ struct ComposerFields: View {
                     .accessibilityHidden(model.title.isEmpty).frame(width: 30)
             }.padding(.vertical, 9)
             Rectangle().fill(Color(hex: 0xEEEEE6)).frame(height: 1).padding(.bottom, 12)
-            ZStack(alignment: .topLeading) {
-                PasteEditor(text: $model.markdown, enabled: editable, onImages: onImages, onFiles: onFiles)
-                    .padding(.trailing, 30).padding(.bottom, 28)
-                if model.markdown.isEmpty {
-                    Text("有什么想分享的？支持 Markdown，也可粘贴图片…")
-                        .font(InkStyle.font(13)).foregroundStyle(InkStyle.placeholder)
-                        .lineSpacing(6).padding(.top, 5).padding(.trailing, 30).allowsHitTesting(false)
-                }
-                VStack {
-                    HStack { Spacer(); QuietIcon(symbol: "xmark", label: "清空正文") { model.markdown = "" }
-                        .opacity(model.markdown.isEmpty ? 0 : 1).disabled(model.markdown.isEmpty || !editable)
-                        .accessibilityHidden(model.markdown.isEmpty) }
+            VStack(spacing: 0) {
+                ZStack(alignment: .topLeading) {
+                    PasteEditor(text: $model.markdown, enabled: editable, onImages: onImages, onFiles: onFiles)
+                    if model.markdown.isEmpty {
+                        Text("有什么想分享的？支持 Markdown，也可粘贴图片…")
+                            .font(InkStyle.font(13)).foregroundStyle(InkStyle.placeholder)
+                            .lineSpacing(6).padding(.top, 5).allowsHitTesting(false)
+                    }
+                }.frame(maxHeight: .infinity)
+                HStack(spacing: 0) {
+                    Button { model.markdown = "" } label: {
+                        Text("清空").font(InkStyle.font(10))
+                            .foregroundStyle(model.markdown.isEmpty || !editable ? Color(hex: 0xC4C7BD) : InkStyle.muted)
+                            .frame(minWidth: 34, minHeight: 26).contentShape(Rectangle())
+                    }.buttonStyle(.plain).disabled(model.markdown.isEmpty || !editable)
+                        .accessibilityLabel("清空正文")
                     Spacer(minLength: 0)
-                }
-                VStack { Spacer(); HStack {
-                    Spacer()
                     Text("\(model.markdown.count) 字").font(InkStyle.font(10)).monospacedDigit()
-                        .foregroundStyle(InkStyle.placeholder).padding(.horizontal, 4).padding(.vertical, 3)
-                        .background(InkStyle.paper).padding(.trailing, 20).padding(.bottom, 9)
-                }}.allowsHitTesting(false)
-                VStack { Spacer(); HStack { Spacer()
-                    Image(systemName: "line.3.horizontal").font(.system(size: 8)).foregroundStyle(InkStyle.placeholder)
-                        .frame(width: 16, height: 16).contentShape(Rectangle())
-                        .gesture(DragGesture().onChanged { value in
-                            if resizeStart == nil { resizeStart = editorHeight }
-                            editorHeight = min(300, max(150, (resizeStart ?? 150) + value.translation.height))
-                        }.onEnded { _ in resizeStart = nil })
-                        .accessibilityElement().accessibilityLabel("调整正文高度")
-                        .accessibilityAdjustableAction { direction in
-                            switch direction { case .increment: editorHeight = min(300, editorHeight + 30)
-                            case .decrement: editorHeight = max(150, editorHeight - 30)
-                            @unknown default: break }
-                        }
-                }}
-            }.frame(height: expanded ? max(240, editorHeight) : editorHeight)
+                        .foregroundStyle(InkStyle.placeholder).padding(.horizontal, 4).padding(.trailing, 20)
+                }.frame(height: 30).background(InkStyle.paper)
+                    .overlay(alignment: .bottomTrailing) {
+                        Image(systemName: "line.3.horizontal").font(.system(size: 8)).foregroundStyle(InkStyle.placeholder)
+                            .frame(width: 16, height: 16).contentShape(Rectangle())
+                            .gesture(DragGesture().onChanged { value in
+                                if resizeStart == nil { resizeStart = editorHeight }
+                                editorHeight = min(expanded ? 480 : 300, max(expanded ? 240 : 150, (resizeStart ?? 150) + value.translation.height))
+                            }.onEnded { _ in resizeStart = nil })
+                            .accessibilityElement().accessibilityLabel("调整正文高度")
+                            .accessibilityAdjustableAction { direction in
+                                switch direction {
+                                case .increment: editorHeight = min(expanded ? 480 : 300, editorHeight + 30)
+                                case .decrement: editorHeight = max(expanded ? 240 : 150, editorHeight - 30)
+                                @unknown default: break
+                                }
+                            }
+                    }
+            }.frame(height: editorHeight)
+                .onAppear { if expanded { editorHeight = 270 } }
+
         }.foregroundStyle(InkStyle.ink)
     }
 }
@@ -132,11 +136,12 @@ struct PasteEditor: NSViewRepresentable {
         editor.isVerticallyResizable = true; editor.isHorizontallyResizable = false
         editor.autoresizingMask = [.width]; editor.textContainer?.widthTracksTextView = true
         editor.textContainer?.lineFragmentPadding = 0
-        // Text must not run beneath the clear control or the pinned word counter.
+        // The footer is a separate sibling of the scrolling editor.
         editor.textContainerInset = NSSize(width: 0, height: 5)
         editor.textContainer?.lineFragmentPadding = 0
         let paragraph = NSMutableParagraphStyle()
-        paragraph.minimumLineHeight = 23.4; paragraph.maximumLineHeight = 23.4
+        // Use inter-line spacing rather than stretching the font line box and caret.
+        paragraph.lineSpacing = max(0, 23.4 - (editor.layoutManager?.defaultLineHeight(for: editor.font!) ?? 18))
         editor.defaultParagraphStyle = paragraph
         editor.typingAttributes = [.font: editor.font!, .paragraphStyle: paragraph, .foregroundColor: editor.textColor!]
         scroll.documentView = editor
@@ -408,27 +413,23 @@ struct DispatchAction: View {
 
 struct DispatchStatus: View {
     let model: DispatchModel
-    let controller: DispatchController
+    private var message: String {
+        switch model.overallPhase {
+        case .pending:
+            return "选好渠道后，开始填写。"
+        case .preparing:
+            let index = model.currentPlatform.flatMap { model.taskPlatforms.firstIndex(of: $0) }.map { $0 + 1 } ?? 0
+            return "正在填写 \(index)/\(model.taskPlatforms.count) 个渠道，可以先忙别的，完成后我会提醒你"
+        case .awaitingConfirm:
+            return "全部已填好。请前往浏览器检查，并亲手点击发布；墨驿的填写任务已完成。"
+        default:
+            return "部分渠道遇到问题，需要您前往浏览器手工处理。已填好的内容会保留，处理后可继续。"
+        }
+    }
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if model.overallPhase == .preparing {
-                let index = model.currentPlatform.flatMap { model.taskPlatforms.firstIndex(of: $0) }.map { $0 + 1 } ?? 0
-                Text("正在填写 \(index)/\(model.taskPlatforms.count) 个渠道，可以先忙别的，完成后我会提醒你")
-            } else if model.overallPhase == .awaitingConfirm {
-                Text("全部已填好，请检查内容并亲手发布。")
-            } else if model.overallPhase != .pending {
-                Text("需要您手工处理").foregroundStyle(InkStyle.ink)
-            }
-            ForEach(model.taskPlatforms.filter { [.failed, .needLogin].contains(model.platformPhase[$0] ?? .pending) }) { platform in
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("\(platform.title)：\(model.platformMessages[platform] ?? "请到浏览器检查")").foregroundStyle(InkStyle.warning)
-                    HStack {
-                        Button("前往处理 ↗", action: controller.openWorkspace)
-                        Button(model.platformPhase[platform] == .needLogin ? "我已登录，继续" : "已处理，继续") { controller.resume(platform) }
-                    }.buttonStyle(.plain).foregroundStyle(InkStyle.ink).disabled(model.overallPhase == .preparing)
-                }
-            }
-        }.font(InkStyle.font(11)).foregroundStyle(InkStyle.muted).lineSpacing(5).frame(maxWidth: .infinity, alignment: .leading)
+        Text(message).font(InkStyle.font(10)).foregroundStyle(Color(hex: 0x929889))
+            .multilineTextAlignment(.center).lineSpacing(4)
+            .frame(maxWidth: .infinity).fixedSize(horizontal: false, vertical: true)
     }
 }
 

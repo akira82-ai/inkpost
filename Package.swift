@@ -24,5 +24,6 @@ let package = Package(
             dependencies: ["PublishKit"]
         ),
         .testTarget(name: "PublishKitTests", dependencies: ["PublishKit"]),
+        .testTarget(name: "PublishFlowTests", dependencies: ["PublishFlow"]),
     ]
 )

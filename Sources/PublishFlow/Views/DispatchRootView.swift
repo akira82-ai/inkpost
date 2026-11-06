@@ -6,6 +6,6 @@ struct DispatchRootView: View {
 
     var body: some View {
         ContentView(model: controller.state, controller: controller)
-            .frame(minWidth: 900, minHeight: 660)
+            .frame(minWidth: 1040, minHeight: 720)
     }
 }

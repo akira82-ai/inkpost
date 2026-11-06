@@ -7,7 +7,15 @@ public enum Resources {
     }
 
     public static func url(_ name: String, ext: String, sub: String) throws -> URL {
-        guard let u = Bundle.module.url(forResource: name, withExtension: ext, subdirectory: sub) else {
+        let bundle: Bundle
+        if Bundle.main.bundleURL.pathExtension == "app" {
+            guard let resources = Bundle.main.resourceURL,
+                  let embedded = Bundle(url: resources.appendingPathComponent("PublishFlow_PublishKit.bundle")) else {
+                throw ResourceError.missing("PublishFlow_PublishKit.bundle")
+            }
+            bundle = embedded
+        } else { bundle = Bundle.module }
+        guard let u = bundle.url(forResource: name, withExtension: ext, subdirectory: sub) else {
             throw ResourceError.missing("\(sub)/\(name).\(ext)")
         }
         return u

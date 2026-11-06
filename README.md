@@ -1,6 +1,6 @@
 # 墨驿 Inkpost
 
-当前版本：`0.1.1`
+当前版本：`0.2.0`
 
 > 「墨」承文脉，「驿」管送达——内容驿站：一次投递，各平台分发。
 
@@ -9,7 +9,7 @@ Mac 上的多平台内容分发台：**App 内置极简 agent，驱动 ego lite 
 ```
 ┌─────────────────────────────────────────────────────┐
 │ Inkpost.app (SwiftUI)                               │
-│  内容表单 → 平台勾选 → 分发 → 进度日志 → 确认卡点 → 回执 │
+│  菜单栏 → 简约填写 → 渠道进度 → 人工处理 → 已填好 │
 │                                                     │
 │  AgentLoop（~200 行）                                │
 │   · OpenAI 兼容 tool-use 循环（默认 DeepSeek）        │
@@ -46,7 +46,7 @@ swift run flowctl agent-demo   # 极简 agent 管道验证
 swift run flowctl cleanup      # 清理测试遗留的 ego TaskSpace
 ```
 
-界面版使用：左栏填入 DeepSeek API Key（模型默认 `deepseek-chat`，地址固定 `https://api.deepseek.com`）→ 添加图片 → 右栏写标题/正文(Markdown)/话题 → 「开始分发」→ 观察 agent 日志 → 到 ego 浏览器检查草稿并亲手发布 → 回到 App 点「读取回执」。
+界面版使用：菜单栏打开墨驿 → 右上角进入完整界面配置 DeepSeek API Key → 填写内容、添加图片并选择渠道 →「填写到所选渠道」→ 需要时手工处理异常 →「已填好，前往确认并发布」→ 在 ego Lite 中亲手发布。
 
 ## 当前状态
 
@@ -82,11 +82,37 @@ Sources/flowctl/        CLI（agent-demo / prepare / finalize / cleanup）
 
 采用适配 SwiftUI 的 MVC + Services：View → Controller → Model / Services，View 观察 Model 自动刷新。所有 UI 都放在 Views 中；Controller 不依赖 SwiftUI 或 AppKit，也不实现浏览器脚本、HTTP 或文件读写。平台任务状态统一使用 PublishKit.TargetPhase。
 
-GUI 与 CLI 的 agent-demo 共用 AgentDispatchService.run，Controller 可注入 DispatchServicing 替身进行离线验证。现有确定性 prepare/finalize CLI 适配器保留。本轮仅拆分职责，尚未接入帖子持久化、修复正文截断或加强发布权限。
+GUI 与 CLI 的 agent-demo 共用 AgentDispatchService.run，Controller 可注入 DispatchServicing 替身进行离线验证。现有确定性 prepare/finalize CLI 适配器保留。帖子持久化尚未接入；简约模式开发已修复正文截断、统一状态，并把模型任意 JS 工具替换为固定只读检查。
 
-验证：`swift build`、`swift test`（需包含 XCTest 的 Xcode 开发环境），以及安装 ego Lite 后的 `swift run flowctl agent-demo`。如果旧缓存记录了仓库改名前的路径，可使用 `--scratch-path /tmp/inkpost-mvc-build` 构建与测试，无需删除原缓存。
+验证：`swift build`、`swift test`（Swift Testing；CLT 环境补充命令见下文），以及安装 ego Lite 后的 `swift run flowctl agent-demo`。如果旧缓存记录了仓库改名前的路径，可使用 `--scratch-path /tmp/inkpost-mvc-build` 构建与测试，无需删除原缓存。
 
 ## 参考
 
 - ego lite 官方文档：https://lite.ego.app/document/en/docs/ego-browser（调用规范：stdin 单脚本 + 官方 helper）
 - 同类模式的开源项目：BloopAI/vibe-kanban、getAsterisk/opcode、ttnear/Clarc（SwiftUI 原生调 Claude Code）
+
+## 简约模式（本地开发版）
+
+设置 `INKPOST_SIGNING_IDENTITY` 为已配置的正式代码签名身份，再运行 `bash Scripts/make-app.sh`（不允许临时签名；签名验证通过后替换旧进程并检查启动）后，墨驿常驻菜单栏，点击图标展开 420pt 快速填写界面；右上角进入完整窗口配置 DeepSeek。两种界面共享内容。关闭完整窗口不退出应用，菜单栏更多菜单可退出。
+
+- 本地选择 / 正文粘贴图片，最多 6 张；按字节内容去重，预览、移除与排序；附件保存在系统临时目录，不保证退出或系统清理后的恢复。
+- 渠道采用 6 列栅格并保存上次选择。仅显示已接入渠道；HTML 原型中的其他平台未因此获得真实支持。
+- 状态为等待开始、正在填写、需要您手工处理、已填好。填写中按钮跟随当前渠道滚动，结束或异常给出站内提示；打包 App 获得通知权限后才发系统提醒。
+- 一次任务共用一个 ego Lite Space，各渠道绑定 Page 标签；人工检查时交还控制，用户处理后可继续单个异常渠道。恢复时模型需重新检查原页面，复杂编辑器恢复仍需实测。
+- 模型不再获得任意 JavaScript 求值工具；固定只读检查回读正文、标题、图片数量。平台无法可靠提供选择器或校验不符时转人工处理，不误报已填好。
+- 真实平台页面会变化，尚未做全平台回归；不会以测试为由向真实平台发布。
+
+设计与计划：`prototypes/inpost-prototype-简约模式.html`、`docs/plans/compact-mode-implementation.md`。
+
+### 验证
+
+完整 Xcode 环境可运行 `swift build`、`swift test`。当前开发机只有 Command Line Tools，其 XCTest 不可用，测试已采用随工具链提供的 Swift Testing。若遇到模块路径错误，可用以下命令（路径以本机工具链为准）：
+
+```bash
+swift test --disable-xctest --scratch-path /tmp/inkpost-compact-build \
+  -Xswiftc -F -Xswiftc /Library/Developer/CommandLineTools/Library/Developer/Frameworks \
+  -Xswiftc -Xfrontend -Xswiftc -disable-cross-import-overlays \
+  -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/Frameworks
+```
+
+项目改名前遗留的 `.build` 缓存可能引用旧目录；使用新的 `--scratch-path`，无须删除现有缓存。浏览器冒烟：`swift run --scratch-path /tmp/inkpost-compact-build flowctl compact-smoke`，验证同 Space 双 Page、正文与图片，不点击发布；`agent-demo` 保留模拟人工确认的历史管道演示。

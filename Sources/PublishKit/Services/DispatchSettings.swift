@@ -6,6 +6,13 @@ public struct DispatchSettings {
 
     public init(defaults: UserDefaults = .standard) { self.defaults = defaults }
 
+    public func selectedPlatforms() -> [PlatformID] {
+        guard let saved = defaults.stringArray(forKey: "inkpost.channels") else { return [.zhihu, .jike, .x] }
+        return saved.compactMap(PlatformID.init(rawValue:)).filter { $0.isAvailable }
+    }
+    public func savePlatforms(_ platforms: [PlatformID]) {
+        defaults.set(platforms.map(\.rawValue), forKey: "inkpost.channels")
+    }
     public func load() -> LLMConfig {
         LLMConfig(baseURL: Self.baseURL,
             apiKey: defaults.string(forKey: "deepseek.apiKey") ?? "",

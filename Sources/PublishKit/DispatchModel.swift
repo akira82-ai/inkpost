@@ -10,6 +10,7 @@ public final class DispatchModel {
     public var markdown = ""
     public var tagsText = ""
     public var assetPaths: [String] = []
+    public var assetData: [String: Data] = [:]
 
     // 平台选择
     public var selectedPlatforms: [PlatformID] = [.zhihu, .jike, .x]
@@ -24,5 +25,9 @@ public final class DispatchModel {
     public var eventLog: [String] = []
     public var manualReceipt = ""
     public var errorMessage: String?
+    public var notice: String?
+    public var currentPlatform: PlatformID?
+    public var platformMessages: [PlatformID: String] = [:]
+    public var taskPlatforms: [PlatformID] = []
 
 }

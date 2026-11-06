@@ -140,6 +140,9 @@ public struct EgoLiteEngine {
         let parsed: [String: Any]? = candidate.flatMap {
             ($0.data(using: .utf8)).flatMap { try? JSONSerialization.jsonObject(with: $0) }
         } as? [String: Any]
+        guard exitCode == 0 else {
+            throw EngineError.failed(exitCode: exitCode, tail: lines.suffix(12).joined(separator: "\n"))
+        }
         if let obj = parsed {
             return StepResult(rawOutput: combined, json: obj)
         }

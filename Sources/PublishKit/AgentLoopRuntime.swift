@@ -8,7 +8,7 @@ public struct OpenAICompatClient: LLMSession {
     public init(config: LLMConfig) { self.config = config }
 
     public func complete(messages: [ChatMessage], tools: [ToolDef]) async throws -> AssistantTurn {
-        var body: [String: Any] = [
+        let body: [String: Any] = [
             "model": config.model,
             "messages": messages.map { m -> [String: Any] in
                 var o: [String: Any] = ["role": m.role]
@@ -102,7 +102,7 @@ public final class AgentLoop {
         self.maxSteps = maxSteps
     }
 
-    /// 系统提示词：分发契约（安全边界在这里被声明）+ 工具认知
+    /// 系统提示词：行为约定与工具说明，不构成浏览器安全沙箱。
     public static let systemPrompt = """
     你是 PublishFlow 的内容分发 agent。目标：把给定的标题、正文、图片填入目标平台的创作/发布页面，最终停在可编辑草稿状态。
 
@@ -116,7 +116,7 @@ public final class AgentLoop {
     工具与页面认知：
     - 先 navigate 打开页面，再 snapshot 获取语义树。快照节点形如 [ref=N]，fill/click 的 target 直接写 "@N"，也可用 CSS 选择器。
     - 标题类输入框用 fill；富文本正文（contenteditable）用 paste_html；图片上传控件（input[type=file]）用 upload。
-    - 关键步骤后用 evaluate 回读校验（例如标题框的 value、编辑器的 textContent 长度）。
+    - 关键步骤后用 inspect 回读校验。finish draftReady 时必须提供 body_target 的 CSS 选择器，文章还要 title_target；有图片时提供 image_target（包含全部上传预览图片的容器，或仍保存文件的 input）。不要捏造选择器。
     - 行动要少而准：一般 6~10 步完成；不确定时先 snapshot 再行动。
     """
 
@@ -150,9 +150,8 @@ public final class AgentLoop {
                 "paths": ["type": "array", "items": ["type": "string"], "description": "本地绝对路径"],
             ],
         ]),
-        ToolDef(name: "evaluate", description: "在页面上下文执行只读 JS 并返回结果（用于校验）", parameters: [
-            "type": "object", "required": ["js"],
-            "properties": ["js": ["type": "string"]],
+        ToolDef(name: "inspect", description: "只读检查 CSS 选择器对应元素的文本、文件数量与图片数量", parameters: [
+            "type": "object", "required": ["target"], "properties": ["target": ["type": "string"]],
         ]),
         ToolDef(name: "finish", description: "结束任务并报告结果（这是你唯一正确的结束方式）", parameters: [
             "type": "object", "required": ["status", "message"],
@@ -160,6 +159,9 @@ public final class AgentLoop {
                 "status": ["type": "string", "enum": ["draftReady", "needLogin", "failed"]],
                 "message": ["type": "string"],
                 "draft_url": ["type": "string"],
+                "title_target": ["type": "string"],
+                "body_target": ["type": "string"],
+                "image_target": ["type": "string"],
             ],
         ]),
     ]
@@ -172,6 +174,7 @@ public final class AgentLoop {
         ]
 
         for step in 1...maxSteps {
+            try Task.checkCancellation()
             onEvent?("思考中…（第 \(step) 步）")
             let turn = try await llm.complete(messages: messages, tools: Self.toolDefs)
 
@@ -189,10 +192,13 @@ public final class AgentLoop {
                     messages.append(ChatMessage(role: "tool", content: outcome, tool_call_id: call.id))
                     if call.function.name == "finish" {
                         let args = parse(call.function.arguments)
-                        let f = EgoBridge.Finish(
+                        var f = EgoBridge.Finish(
                             status: (args["status"] as? String) ?? "failed",
                             message: (args["message"] as? String) ?? "",
                             draftURL: args["draft_url"] as? String)
+                        f.titleTarget = args["title_target"] as? String
+                        f.bodyTarget = args["body_target"] as? String
+                        f.imageTarget = args["image_target"] as? String
                         onEvent?("任务结束：\(f.status) — \(f.message)")
                         return f
                     }
@@ -202,7 +208,7 @@ public final class AgentLoop {
         return EgoBridge.Finish(status: "failed", message: "超过最大步数（\(maxSteps)）")
     }
 
-    /// 工具执行：映射到 EgoBridge；发布类动作在工具层就不存在，无从违规
+    /// 工具执行映射；只读检查固定实现，写入工具仍需审查操作范围。
     func execute(_ call: ToolCall) async -> String {
         let name = call.function.name
         let args = parse(call.function.arguments)
@@ -225,8 +231,8 @@ public final class AgentLoop {
                 payload = try await bridge.upload(
                     target: require(args, "target"),
                     paths: (args["paths"] as? [String]) ?? [])
-            case "evaluate":
-                payload = try await bridge.evaluate(js: require(args, "js"))
+            case "inspect":
+                payload = try await bridge.inspect(target: require(args, "target"))
             case "finish":
                 return "{\"ok\":true}" // finish 由 run() 捕获返回
             default:

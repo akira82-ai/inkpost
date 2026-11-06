@@ -35,6 +35,8 @@ struct FlowCTL {
             case "dumpscript":
                 let script = EgoLiteEngine.taskScript(adapterPath: adapterPath, task: task, step: "prepare")
                 print(script)
+            case "compact-smoke":
+                try await runCompactSmoke(engine: engine, fixtureURL: fixtureURL, task: task)
             case "agent-demo":
                 try await runAgentDemo(engine: engine, fixtureURL: fixtureURL, task: task)
             default:
@@ -106,7 +108,7 @@ struct FlowCTL {
             call("t2", "fill", ["target": "input#title", "text": "agent 引擎冒烟"]),
             call("t3", "paste_html", ["target": "#editor", "html": "<p>第一段：<b>加粗</b>验证。</p><p>第二段：agent 路线。</p>"]),
             call("t4", "upload", ["target": "input#files", "paths": [task.assets.first?.path ?? ""]]),
-            call("t5", "evaluate", ["js": "document.querySelector('input#title').value"]),
+            call("t5", "inspect", ["target": "input#title"]),
             call("t6", "finish", ["status": "draftReady", "message": "模拟平台草稿就绪", "draft_url": url]),
         ])
 
@@ -126,6 +128,35 @@ struct FlowCTL {
         let receipt = try await bridge.evaluate(js: "document.querySelector('#receipt') && document.querySelector('#receipt').dataset.url || ''")
         print("  回执原始输出：\(receipt.prefix(200))")
         print("\n✅ 极简 agent 管道端到端通过（LLM 就绪后把 ScriptedLLM 换成 OpenAICompatClient 即为真实产品）")
+    }
+
+    /// Verify explicit page isolation without publishing even to the fixture.
+    static func runCompactSmoke(engine: EgoLiteEngine, fixtureURL: URL, task: PublishTask) async throws {
+        let first = try EgoBridge(spaceName: task.spaceName, engine: engine)
+        _ = try await first.navigate(url: fixtureURL.absoluteString)
+        _ = try await first.fill(target: "#title", text: "First channel")
+        let nameData = try JSONSerialization.data(withJSONObject: [task.spaceName])
+        let name = String(decoding: nameData, as: UTF8.self)
+        let secondPage = try await engine.runRaw(script: "const task = await taskSpace(\(name)[0]); const page = await task.newPage(); cliLog(JSON.stringify({label: page.label}));")
+        guard let label = secondPage.string("label"), label != "p1" else { throw DemoError("Second page not created") }
+        let second = try EgoBridge(spaceName: task.spaceName, engine: engine, pageLabel: label)
+        _ = try await second.navigate(url: fixtureURL.absoluteString)
+        _ = try await second.fill(target: "#title", text: "Second channel")
+        _ = try await first.pasteHTML(target: "#editor", html: "<p>Independent content</p>", plainFallback: "Independent content")
+        _ = try await first.upload(target: "#files", paths: task.assets.map(\.path))
+        func value(_ output: String) throws -> [String: Any] {
+            let object = try JSONSerialization.jsonObject(with: Data(output.utf8)) as? [String: Any]
+            guard let value = object?["value"] as? [String: Any] else { throw DemoError("Invalid inspection result") }
+            return value
+        }
+        let firstTitle = try value(await first.inspect(target: "#title"))
+        let secondTitle = try value(await second.inspect(target: "#title"))
+        let body = try value(await first.inspect(target: "#editor"))
+        let files = try value(await first.inspect(target: "#files"))
+        guard firstTitle["text"] as? String == "First channel", secondTitle["text"] as? String == "Second channel",
+              body["text"] as? String == "Independent content", files["files"] as? Int == 1 else { throw DemoError("Page isolation or content verification failed") }
+        _ = try await engine.runRaw(script: "const task = await taskSpace(\(name)[0]); await task.finish({keep: []}); cliLog(JSON.stringify({ok:true}));")
+        print("✅ One Space / two Pages: isolated titles, rich text and upload verified; no publish action.")
     }
 
     // MARK: - Space 清理

@@ -1,8 +1,9 @@
-import XCTest
+import Foundation
+import Testing
 @testable import PublishKit
 
 @MainActor
-final class DispatchControllerTests: XCTestCase {
+struct DispatchControllerTests {
     private func makeController(_ service: FakeDispatchService) -> DispatchController {
         let defaults = UserDefaults(suiteName: "inkpost-tests-\(UUID().uuidString)")!
         let controller = DispatchController(service: service, settings: DispatchSettings(defaults: defaults))
@@ -17,48 +18,104 @@ final class DispatchControllerTests: XCTestCase {
         while controller.state.overallPhase == .preparing && Date() < deadline {
             try await Task.sleep(nanoseconds: 1_000_000)
         }
-        XCTAssertNotEqual(controller.state.overallPhase, .preparing, "Dispatch timed out")
+        #expect(controller.state.overallPhase != .preparing, "Dispatch timed out")
     }
 
-    func testSerialDispatchUsesPlatformRulesAndMapsResults() async throws {
+    @Test func testSerialDispatchUsesPlatformRulesAndMapsResults() async throws {
         let service = FakeDispatchService()
         service.statuses = [.zhihu: "draftReady", .jike: "needLogin", .x: "failed"]
         let controller = makeController(service)
         controller.state.tagsText = "#swift #macOS"
         controller.dispatch()
-        XCTAssertFalse(controller.canDispatch)
+        #expect(!controller.canDispatch)
         try await waitForDispatch(controller)
-        XCTAssertEqual(service.platforms, [.zhihu, .jike, .x])
-        XCTAssertEqual(controller.state.platformPhase[.zhihu], .awaitingConfirm)
-        XCTAssertEqual(controller.state.platformPhase[.jike], .needLogin)
-        XCTAssertEqual(controller.state.platformPhase[.x], .failed)
-        XCTAssertTrue(service.goals[0].contains("https://zhuanlan.zhihu.com/write"))
-        XCTAssertTrue(service.goals[0].contains("#swift #macOS"))
-        XCTAssertTrue(service.goals[1].contains("https://web.okjike.com"))
-        XCTAssertTrue(service.goals[2].contains("https://x.com/compose/post"))
+        #expect(service.platforms == [.zhihu, .jike, .x])
+        #expect(controller.state.platformPhase[.zhihu] == .awaitingConfirm)
+        #expect(controller.state.platformPhase[.jike] == .needLogin)
+        #expect(controller.state.platformPhase[.x] == .failed)
+        #expect(service.goals[0].contains("https://zhuanlan.zhihu.com/write"))
+        #expect(service.goals[0].contains("#swift #macOS"))
+        #expect(service.goals[1].contains("https://web.okjike.com"))
+        #expect(service.goals[2].contains("https://x.com/compose/post"))
     }
 
-    func testServiceFailureDoesNotPreventNextPlatform() async throws {
+    @Test func testRetryOnlyResumesFailedChannelAndKeepsSnapshot() async throws {
+        let service = FakeDispatchService()
+        service.statuses[.x] = "needLogin"
+        let controller = makeController(service)
+        controller.dispatch()
+        try await waitForDispatch(controller)
+        #expect(controller.state.overallPhase == .failed)
+        let original = service.goals.last
+        controller.state.markdown = "Changed during pause"
+        service.statuses[.x] = "draftReady"
+        controller.resume(.x)
+        try await waitForDispatch(controller)
+        #expect(service.platforms == [.zhihu, .jike, .x, .x])
+        #expect(service.goals.last == original)
+        #expect(controller.state.overallPhase == .awaitingConfirm)
+    }
+
+    @Test func testFullBodyAndHTMLReachPlatformGoal() {
+        let body = String(repeating: "完整内容", count: 400)
+        let goal = PlatformRules.goal(for: .zhihu, title: "Title", html: "<p>rich</p>", plain: body, tags: [], assets: [])
+        #expect(goal.contains(body))
+        #expect(goal.contains("<p>rich</p>"))
+    }
+
+    @Test func testVerificationFailureIsNotReportedAsFilled() async throws {
+        let service = FakeDispatchService()
+        service.verificationFailure = .zhihu
+        let controller = makeController(service)
+        controller.dispatch()
+        controller.dispatch()
+        try await waitForDispatch(controller)
+        #expect(service.platforms.count == 3)
+        #expect(controller.state.overallPhase == .failed)
+        #expect(controller.state.platformPhase[.zhihu] == .failed)
+        #expect(controller.state.platformMessages[.zhihu]?.contains("verification") == true)
+    }
+
+    @Test func testEditingUnfinishedChannelsPreservesContentAndExcludesCompleted() async throws {
+        let service = FakeDispatchService(); service.statuses[.x] = "failed"
+        let controller = makeController(service)
+        controller.dispatch(); try await waitForDispatch(controller)
+        controller.editUnfinishedChannels()
+        #expect(controller.state.overallPhase == .pending)
+        #expect(controller.state.selectedPlatforms == [.x])
+        #expect(controller.state.markdown == "Test **body**")
+    }
+
+    @Test func testSavedChannelSelectionIncludesEmptySelection() {
+        let defaults = UserDefaults(suiteName: "inkpost-channels-\(UUID().uuidString)")!
+        let settings = DispatchSettings(defaults: defaults)
+        settings.savePlatforms([.jike, .x])
+        #expect(settings.selectedPlatforms() == [.jike, .x])
+        settings.savePlatforms([])
+        #expect(settings.selectedPlatforms().isEmpty)
+    }
+
+    @Test func testServiceFailureDoesNotPreventNextPlatform() async throws {
         let service = FakeDispatchService()
         service.throwPlatform = .zhihu
         let controller = makeController(service)
         controller.dispatch()
         try await waitForDispatch(controller)
-        XCTAssertEqual(controller.state.platformPhase[.zhihu], .failed)
-        XCTAssertEqual(controller.state.platformPhase[.x], .awaitingConfirm)
-        XCTAssertEqual(service.platforms.count, 3)
+        #expect(controller.state.platformPhase[.zhihu] == .failed)
+        #expect(controller.state.platformPhase[.x] == .awaitingConfirm)
+        #expect(service.platforms.count == 3)
     }
 
-    func testEmptyContentDoesNotInvokeService() {
+    @Test func testEmptyContentDoesNotInvokeService() {
         let service = FakeDispatchService()
         let controller = makeController(service)
         controller.state.markdown = ""
         controller.dispatch()
-        XCTAssertEqual(controller.state.overallPhase, .pending)
-        XCTAssertTrue(service.platforms.isEmpty)
+        #expect(controller.state.overallPhase == .pending)
+        #expect(service.platforms.isEmpty)
     }
 
-    func testReceiptAndReset() async throws {
+    @Test func testReceiptAndReset() async throws {
         let service = FakeDispatchService()
         let controller = makeController(service)
         controller.readFixtureReceipt(for: .simFixture)
@@ -66,18 +123,18 @@ final class DispatchControllerTests: XCTestCase {
         while controller.state.manualReceipt.isEmpty && Date() < deadline {
             try await Task.sleep(nanoseconds: 1_000_000)
         }
-        XCTAssertEqual(controller.state.manualReceipt, "https://example.com/post/1")
+        #expect(controller.state.manualReceipt == "https://example.com/post/1")
         controller.reset()
-        XCTAssertTrue(controller.state.manualReceipt.isEmpty)
-        XCTAssertEqual(controller.state.overallPhase, .pending)
+        #expect(controller.state.manualReceipt.isEmpty)
+        #expect(controller.state.overallPhase == .pending)
     }
 
-    func testConfigurationUsesExistingKeys() {
+    @Test func testConfigurationUsesExistingKeys() {
         let defaults = UserDefaults(suiteName: "inkpost-tests-\(UUID().uuidString)")!
         let settings = DispatchSettings(defaults: defaults)
         settings.save(apiKey: "key", model: "model")
-        XCTAssertEqual(defaults.string(forKey: "deepseek.apiKey"), "key")
-        XCTAssertEqual(settings.load().model, "model")
+        #expect(defaults.string(forKey: "deepseek.apiKey") == "key")
+        #expect(settings.load().model == "model")
     }
 }
 
@@ -85,6 +142,7 @@ final class DispatchControllerTests: XCTestCase {
 private final class FakeDispatchService: DispatchServicing {
     var statuses: [PlatformID: String] = [:]
     var throwPlatform: PlatformID?
+    var verificationFailure: PlatformID?
     var platforms: [PlatformID] = []
     var goals: [String] = []
 
@@ -96,6 +154,9 @@ private final class FakeDispatchService: DispatchServicing {
         return .init(status: statuses[platform] ?? "draftReady", message: "test")
     }
 
+    func verifyDraft(platform: PlatformID, result: EgoBridge.Finish, title: String, body: String, imageCount: Int) async throws {
+        if platform == verificationFailure { throw NSError(domain: "test", code: 2, userInfo: [NSLocalizedDescriptionKey: "verification failed"]) }
+    }
     func readReceipt(for platform: PlatformID) async throws -> String {
         "https://example.com/post/1"
     }

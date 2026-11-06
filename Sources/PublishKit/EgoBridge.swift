@@ -8,10 +8,12 @@ import Foundation
 public struct EgoBridge {
     let engine: EgoLiteEngine
     public let spaceName: String
+    public let pageLabel: String
 
-    public init(spaceName: String, engine: EgoLiteEngine) throws {
+    public init(spaceName: String, engine: EgoLiteEngine, pageLabel: String = "p1") throws {
         self.spaceName = spaceName
         self.engine = engine
+        self.pageLabel = pageLabel
     }
 
     // MARK: - 工具集（映射到官方 helper）
@@ -20,9 +22,8 @@ public struct EgoBridge {
     public func navigate(url: String) async throws -> String {
         let r = try await run(
             """
-            await ensureRealTab();
-            await openOrReuseTab(\(jsStr(url)), { wait: true, timeout: 30 });
-            const info = await pageInfo();
+            await page.goto(\(jsStr(url)));
+            const info = await page.info();
             cliLog(JSON.stringify({ ok: true, url: info.url, title: info.title }));
             """)
         return r
@@ -32,7 +33,7 @@ public struct EgoBridge {
     public func snapshot(scope: String = "full_page") async throws -> String {
         let r = try await run(
             """
-            const snap = await snapshotText({ scope: \(jsStr(scope)) });
+            const snap = await page.snapshot({ scope: \(jsStr(scope)) });
             cliLog(JSON.stringify({ ok: true, snapshot: snap }));
             """)
         return r
@@ -42,7 +43,7 @@ public struct EgoBridge {
     public func fill(target: String, text: String) async throws -> String {
         let r = try await run(
             """
-            await fillInput(\(jsStr(target)), \(jsStr(text)));
+            await page.fill(\(jsStr(target)), \(jsStr(text)));
             cliLog(JSON.stringify({ ok: true }));
             """)
         return r
@@ -64,8 +65,8 @@ public struct EgoBridge {
             "})()"
         let r = try await run(
             """
-            await click(\(jsStr(target)), { label: '聚焦编辑器' });
-            const len = await js(\(jsStr(source)));
+            await page.click(\(jsStr(target)), { label: '聚焦编辑器' });
+            const len = await page.evaluate(\(jsStr(source)));
             cliLog(JSON.stringify({ ok: true, textLength: len }));
             """)
         _ = plainFallback
@@ -76,32 +77,36 @@ public struct EgoBridge {
     public func upload(target: String, paths: [String]) async throws -> String {
         let r = try await run(
             """
-            for (const p of \(jsArr(paths))) {
-              await uploadFile(\(jsStr(target)), p);
-            }
+            await page.setInputFiles(\(jsStr(target)), \(jsArr(paths)));
             cliLog(JSON.stringify({ ok: true, count: \(paths.count) }));
             """)
         return r
     }
 
-    /// 点击（ref 或 selector；仅用于非发布类控件，发布类动作被 App 层禁止）
+    /// 内部点击辅助；模型不直接获得任意点击工具。
     public func click(target: String, label: String) async throws -> String {
         let r = try await run(
             """
-            await click(\(jsStr(target)), { label: \(jsStr(label)) });
+            await page.click(\(jsStr(target)), { label: \(jsStr(label)) });
             cliLog(JSON.stringify({ ok: true }));
             """)
         return r
     }
 
-    /// 页面上下文只读求值（回读状态、校验）
+    /// 内部页面求值，仅供可信实现与 fixture 使用；不暴露给模型。
     public func evaluate(js source: String) async throws -> String {
         let r = try await run(
             """
-            const v = await js(String.raw`\(source)`);
+            const v = await page.evaluate(\(jsStr(source)));
             cliLog(JSON.stringify({ ok: true, value: v }));
             """)
         return r
+    }
+
+    /// Fixed read operation available to the model; no model-supplied JavaScript.
+    public func inspect(target: String) async throws -> String {
+        let source = "(() => { const el = document.querySelector(\(jsStr(target))); if (!el) throw new Error('element not found'); return {text: el.value ?? el.innerText ?? el.textContent ?? '', files: el.files ? el.files.length : 0, images: el.querySelectorAll('img').length}; })()"
+        return try await evaluate(js: source)
     }
 
     /// 结束标记（供 AgentLoop 判定任务完成）
@@ -109,6 +114,9 @@ public struct EgoBridge {
         public var status: String   // draftReady | needLogin | failed
         public var message: String
         public var draftURL: String?
+        public var titleTarget: String?
+        public var bodyTarget: String?
+        public var imageTarget: String?
         public init(status: String, message: String, draftURL: String? = nil) {
             self.status = status; self.message = message; self.draftURL = draftURL
         }
@@ -119,7 +127,8 @@ public struct EgoBridge {
     /// 把一段官方 helper 调用包进"Space 恢复 + 单脚本执行 + 结果提取"
     func run(_ body: String) async throws -> String {
         let script = """
-        const task = await useOrCreateTaskSpace(\(jsStr(spaceName)));
+        const task = await taskSpace(\(jsStr(spaceName)));
+        const page = task.page(\(jsStr(pageLabel)));
         try {
           \(body)
         } catch (e) {

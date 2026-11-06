@@ -22,7 +22,7 @@
 ## Compact mode implementation
 
 - MenuBarExtra and the full workspace share one DispatchController/DispatchModel. AppKit editor, picker, previews and lifecycle presentation remain in Views.
-- Product workflow ends at awaitingConfirm (已填好); no product UI for published or receipt tracking. Internal fixture CLI may retain receipt checks.
+- Product workflow ends at awaitingConfirm (已填好); no product UI for published or receipt tracking. On successful workspace handoff, archive the content, images and Space identity in session history, then reset the editor while retaining channel selection. Failed handoffs and incomplete tasks must retain content. Internal fixture CLI may retain receipt checks.
 - Assets use AssetService for validation, byte-based SHA-256 deduplication and six-image limits. Temporary assets are not durable drafts.
 - AgentDispatchService owns one Space per task and explicitly labeled Pages per channel. Handoff and user-confirmed resume preserve context.
 - Agent-visible inspect is fixed read-only; arbitrary evaluate remains internal for fixture/tools. Do not claim browser writes are an enforceable no-publish sandbox.

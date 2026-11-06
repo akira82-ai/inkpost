@@ -28,7 +28,7 @@ public final class DispatchController {
     }
 
     public var canDispatch: Bool {
-        state.overallPhase == .pending && !state.selectedPlatforms.isEmpty && (!state.selectedPlatforms.contains(where: { $0.isArticle }) || !state.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) && !state.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !state.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        state.overallPhase == .pending && !state.isHandingOff && !state.selectedPlatforms.isEmpty && (!state.selectedPlatforms.contains(where: { $0.isArticle }) || !state.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) && !state.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !state.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     public func saveConfig() {
@@ -86,8 +86,24 @@ public final class DispatchController {
         state.assetPaths.remove(at: from); state.assetPaths.insert(path, at: to)
     }
     public func openWorkspace() {
-        guard state.overallPhase != .preparing else { return }
-        Task { do { try await service.handOff() } catch { state.notice = error.localizedDescription } }
+        guard state.overallPhase != .preparing, !state.isHandingOff else { return }
+        state.isHandingOff = true
+        let completed = state.overallPhase == .awaitingConfirm
+        Task {
+            defer { state.isHandingOff = false }
+            do {
+                try await service.handOff()
+                if completed {
+                    state.history.insert(DispatchRecord(title: state.title, markdown: state.markdown,
+                        tags: state.tagsText, platforms: state.taskPlatforms, assetPaths: state.assetPaths,
+                        assetData: state.assetData, workspaceID: service.workspaceID), at: 0)
+                    newDraft()
+                    state.eventLog = []
+                    state.platformPhase = [:]
+                    state.notice = "上一份已交接，可以开始新一份内容"
+                }
+            } catch { state.notice = "未能打开工作区，内容已保留，请重试"; log(error.localizedDescription) }
+        }
     }
     public func resume(_ platform: PlatformID) {
         guard state.overallPhase != .preparing, [.failed, .needLogin].contains(state.platformPhase[platform] ?? .pending), taskConfig != nil else { return }

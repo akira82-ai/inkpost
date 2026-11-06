@@ -129,6 +129,44 @@ struct DispatchControllerTests {
         #expect(controller.state.overallPhase == .pending)
     }
 
+    @Test func testSuccessfulHandoffArchivesAndClearsOnlyCompletedDraft() async throws {
+        let service = FakeDispatchService()
+        let controller = makeController(service)
+        controller.dispatch(); try await waitForDispatch(controller)
+        let selection = controller.state.selectedPlatforms
+        controller.openWorkspace(); controller.openWorkspace()
+        while controller.state.isHandingOff { try await Task.sleep(for: .milliseconds(1)) }
+        #expect(service.handoffCount == 1)
+        #expect(controller.state.overallPhase == .pending)
+        #expect(controller.state.title.isEmpty && controller.state.markdown.isEmpty)
+        #expect(controller.state.history.count == 1)
+        #expect(controller.state.history.first?.markdown == "Test **body**")
+        #expect(controller.state.history.first?.workspaceID == 42)
+        #expect(controller.state.selectedPlatforms == selection)
+        controller.state.title = "Next"; controller.state.markdown = "Next body"
+        controller.dispatch(); try await waitForDispatch(controller)
+        #expect(controller.state.history.count == 1)
+    }
+
+    @Test func testFailedHandoffAndPartialTaskKeepContent() async throws {
+        let service = FakeDispatchService()
+        let controller = makeController(service)
+        controller.dispatch(); try await waitForDispatch(controller)
+        service.handoffFails = true
+        controller.openWorkspace()
+        while controller.state.isHandingOff { try await Task.sleep(for: .milliseconds(1)) }
+        #expect(controller.state.overallPhase == .awaitingConfirm)
+        #expect(controller.state.markdown == "Test **body**")
+        #expect(controller.state.history.isEmpty)
+        controller.state.overallPhase = .failed
+        service.handoffFails = false
+        controller.openWorkspace()
+        while controller.state.isHandingOff { try await Task.sleep(for: .milliseconds(1)) }
+        #expect(controller.state.overallPhase == .failed)
+        #expect(controller.state.markdown == "Test **body**")
+        #expect(controller.state.history.isEmpty)
+    }
+
     @Test func testConfigurationUsesExistingKeys() {
         let defaults = UserDefaults(suiteName: "inkpost-tests-\(UUID().uuidString)")!
         let settings = DispatchSettings(defaults: defaults)
@@ -172,6 +210,13 @@ struct DispatchControllerTests {
 
 @MainActor
 private final class FakeDispatchService: DispatchServicing {
+    var workspaceID: Int? { 42 }
+    var handoffCount = 0
+    var handoffFails = false
+    func handOff() async throws {
+        handoffCount += 1
+        if handoffFails { throw NSError(domain: "test-handoff", code: 1) }
+    }
     var statuses: [PlatformID: String] = [:]
     var throwPlatform: PlatformID?
     var verificationFailure: PlatformID?

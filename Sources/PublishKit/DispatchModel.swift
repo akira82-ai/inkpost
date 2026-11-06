@@ -29,5 +29,19 @@ public final class DispatchModel {
     public var currentPlatform: PlatformID?
     public var platformMessages: [PlatformID: String] = [:]
     public var taskPlatforms: [PlatformID] = []
+    public var isHandingOff = false
+    public var history: [DispatchRecord] = []
 
+}
+
+public struct DispatchRecord: Identifiable {
+    public let id = UUID()
+    public let createdAt = Date()
+    public let title: String
+    public let markdown: String
+    public let tags: String
+    public let platforms: [PlatformID]
+    public let assetPaths: [String]
+    public let assetData: [String: Data]
+    public let workspaceID: Int?
 }

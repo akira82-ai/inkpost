@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import PublishKit
 
 struct ContentView: View {
@@ -101,9 +102,7 @@ struct ContentView: View {
                     DispatchAction(model: model, controller: controller)
                     DispatchStatus(model: model)
                 }.frame(maxWidth: .infinity)
-                if model.overallPhase == .awaitingConfirm {
-                    Button("开始新一份", action: controller.newDraft).buttonStyle(.plain).font(InkStyle.font(11)).padding(.top, 12)
-                } else if model.overallPhase == .failed {
+                if model.overallPhase == .failed {
                     Button("修改未完成渠道的内容", action: controller.editUnfinishedChannels).buttonStyle(.plain).font(InkStyle.font(11)).padding(.top, 12)
                 }
             }.padding(.horizontal, 32).padding(.top, 33).padding(.bottom, 24)
@@ -149,11 +148,35 @@ struct ContentView: View {
     }
     private var taskRecord: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("本次投递").font(.custom("Songti SC", size: 26))
-            if model.taskPlatforms.isEmpty {
+            Text("投递记录").font(.custom("Songti SC", size: 26))
+            if !model.history.isEmpty {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        ForEach(model.history) { record in
+                            DisclosureGroup(record.title.isEmpty ? "无标题" : record.title) {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text("已交接 · 发布由你确认").foregroundStyle(InkStyle.muted)
+                                    Text(record.markdown).textSelection(.enabled)
+                                    Text(record.platforms.map(\.title).joined(separator: "、"))
+                                    if let id = record.workspaceID { Text("ego 工作区 #\(id)") }
+                                    HStack {
+                                        ForEach(record.assetPaths, id: \.self) { path in
+                                            if let image = record.assetData[path].flatMap(NSImage.init(data:)) {
+                                                Image(nsImage: image).resizable().scaledToFit().frame(width: 64, height: 64)
+                                            }
+                                        }
+                                    }
+                                }.font(InkStyle.font(12)).padding(.vertical, 10)
+                            }
+                        }
+                        Text("记录仅在本次应用运行期间保留。").font(InkStyle.font(10)).foregroundStyle(InkStyle.muted)
+                    }
+                }
+            }
+            if model.taskPlatforms.isEmpty && model.history.isEmpty {
                 Text("开始填写后，这里会显示各渠道的填写状态。")
                     .font(InkStyle.font(12)).foregroundStyle(InkStyle.muted)
-            } else {
+            } else if !model.taskPlatforms.isEmpty {
                 DispatchStatus(model: model)
                 ForEach(model.taskPlatforms) { platform in
                     HStack {

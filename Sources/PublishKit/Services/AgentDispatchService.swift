@@ -5,6 +5,7 @@ public protocol DispatchServicing {
     func prepare(platform: PlatformID, goal: String, config: LLMConfig,
                  onEvent: @escaping @Sendable (String) -> Void) async throws -> EgoBridge.Finish
     func verifyDraft(platform: PlatformID, result: EgoBridge.Finish, title: String, body: String, imageCount: Int) async throws
+    var workspaceID: Int? { get }
     func beginTask() async throws
     func handOff() async throws
     func resumeControl() async throws
@@ -12,6 +13,7 @@ public protocol DispatchServicing {
 }
 
 public extension DispatchServicing {
+    var workspaceID: Int? { nil }
     func verifyDraft(platform: PlatformID, result: EgoBridge.Finish, title: String, body: String, imageCount: Int) async throws {}
     func beginTask() async throws {}
     func handOff() async throws { throw EgoBridge.BridgeError.toolFailed("当前服务无法打开工作区") }
@@ -24,6 +26,7 @@ public final class AgentDispatchService: DispatchServicing {
     private var spaceName = ""
     private var spaceID: Int?
     private var handedOff = false
+    public var workspaceID: Int? { spaceID }
     public init() {}
     public func beginTask() async throws {
         spaceName = "inkpost \(UUID().uuidString)"

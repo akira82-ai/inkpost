@@ -7,6 +7,7 @@ struct ContentView: View {
     let controller: DispatchController
     @State private var page = WorkspacePage.compose
     @State private var settings = false
+    @State private var showExecutionLog = false
     private enum WorkspacePage: String { case compose = "新的投递", tasks = "投递记录", channels = "渠道管理" }
     var body: some View {
         HStack(spacing: 0) {
@@ -105,6 +106,17 @@ struct ContentView: View {
                 if model.overallPhase == .failed {
                     Button("修改未完成渠道的内容", action: controller.editUnfinishedChannels).buttonStyle(.plain).font(InkStyle.font(11)).padding(.top, 12)
                 }
+                if !model.eventLog.isEmpty {
+                    DisclosureGroup("执行日志（\(model.eventLog.count) 条）", isExpanded: $showExecutionLog) {
+                        ScrollView {
+                            Text(model.eventLog.joined(separator: "\n"))
+                                .font(.system(size: 11, design: .monospaced))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(10)
+                        }.frame(height: 180)
+                    }.font(InkStyle.font(11)).padding(.top, 16)
+                }
             }.padding(.horizontal, 32).padding(.top, 33).padding(.bottom, 24)
         }
     }
@@ -127,6 +139,11 @@ struct ContentView: View {
                     Text(channelState(channel)).font(InkStyle.font(10)).foregroundStyle(channel.available ? InkStyle.muted : InkStyle.warning)
                         .padding(.leading, 39)
                     if let platform = channel.platform, [.failed, .needLogin].contains(model.platformPhase[platform] ?? .pending) {
+                        if let message = model.platformMessages[platform], !message.isEmpty {
+                            Text(message).font(InkStyle.font(11)).foregroundStyle(InkStyle.warning)
+                                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                                .padding(.leading, 39)
+                        }
                         Button(model.platformPhase[platform] == .needLogin ? "我已登录，继续" : "已处理，继续") { controller.resume(platform) }
                             .buttonStyle(.plain).font(InkStyle.font(10)).padding(.leading, 39)
                             .disabled(model.overallPhase == .preparing)

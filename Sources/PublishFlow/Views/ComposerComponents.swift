@@ -68,9 +68,18 @@ struct ComposerFields: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
-                TextField("给这次分享起个标题", text: $model.title, prompt: Text("给这次分享起个标题").font(InkStyle.font(expanded ? 23 : 14)).foregroundColor(InkStyle.placeholder))
-                    .font(InkStyle.font(expanded ? 23 : 14, weight: .semibold)).textFieldStyle(.plain)
-                    .focused($titleFocused).disabled(!editable)
+                ZStack(alignment: .leading) {
+                    TextField("", text: $model.title)
+                        .font(InkStyle.font(expanded ? 23 : 14, weight: .semibold)).textFieldStyle(.plain)
+                        .focused($titleFocused).disabled(!editable)
+                        .accessibilityLabel("标题")
+                    if model.title.isEmpty {
+                        Text("给这次分享起个标题")
+                            .font(InkStyle.font(expanded ? 23 : 14))
+                            .foregroundStyle(InkStyle.placeholder)
+                            .allowsHitTesting(false).accessibilityHidden(true)
+                    }
+                }
                 QuietIcon(symbol: "xmark", label: "清空标题") { model.title = ""; titleFocused = true }
                     .opacity(model.title.isEmpty ? 0 : 1).disabled(model.title.isEmpty || !editable)
                     .accessibilityHidden(model.title.isEmpty).frame(width: 30)
@@ -414,7 +423,7 @@ struct DispatchAction: View {
     }
     private func act() {
         guard model.overallPhase == .pending else { controller.openWorkspace(); return }
-        guard !model.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { model.notice = "请在完整界面的偏好设置中配置 API Key"; return }
+        guard !controller.requiresModelConfiguration || !model.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { model.notice = "请在完整界面的偏好设置中配置 API Key"; return }
         guard controller.canDispatch else { model.notice = "请选择渠道并填写内容；文章渠道还需要标题"; return }
         controller.dispatch()
     }

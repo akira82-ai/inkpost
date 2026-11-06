@@ -380,7 +380,7 @@ struct DispatchAction: View {
     private var title: String {
         switch model.overallPhase {
         case .pending: return "填写到所选渠道"
-        case .preparing: return "正在填写\(model.currentPlatform?.title ?? "所选渠道")…"
+        case .preparing: return "正在填写 · \(model.currentPlatform?.title ?? "所选渠道")"
         case .awaitingConfirm: return "已填好，前往确认并发布 ↗"
         default: return "前往处理 ↗"
         }
@@ -394,14 +394,23 @@ struct DispatchAction: View {
                         .onAppear { pulse = true }.onDisappear { pulse = false }
                         .animation(reduceMotion ? nil : .easeInOut(duration: 0.65).repeatForever(autoreverses: true), value: pulse)
                 }
-                Text(title).id(title).font(InkStyle.font(11, weight: .semibold))
-                    .transition(reduceMotion ? .identity : .asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
-                    .frame(height: 20)
-            }.frame(maxWidth: .infinity).padding(.horizontal, 12).frame(height: 42).clipped()
-                .foregroundStyle(InkStyle.paper).background(filling ? Color(hex: 0x424B3B) : InkStyle.ink, in: RoundedRectangle(cornerRadius: 8))
+                if filling {
+                    HStack(spacing: 6) {
+                        Text("正在填写 ·")
+                        Text(model.currentPlatform?.title ?? "所选渠道")
+                            .id(model.currentPlatform)
+                            .transition(reduceMotion ? .identity : .asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
+                    }.frame(height: 20).clipped()
+                } else {
+                    Text(title).frame(height: 20)
+                }
+            }.font(InkStyle.font(12, weight: .semibold))
+                .frame(maxWidth: .infinity).padding(.horizontal, 12).frame(height: 42).clipped()
+                .foregroundStyle(InkStyle.paper).background(InkStyle.ink, in: RoundedRectangle(cornerRadius: 8))
                 .contentShape(RoundedRectangle(cornerRadius: 8))
-        }.buttonStyle(.plain).disabled(filling)
-            .animation(reduceMotion ? nil : .timingCurve(0.2, 0.7, 0.3, 1, duration: 0.42), value: title)
+        }.buttonStyle(.plain).disabled(filling || model.isHandingOff)
+            .animation(reduceMotion ? nil : .timingCurve(0.2, 0.7, 0.3, 1, duration: 0.42), value: model.currentPlatform)
+            .accessibilityLabel(title)
     }
     private func act() {
         guard model.overallPhase == .pending else { controller.openWorkspace(); return }
@@ -427,7 +436,7 @@ struct DispatchStatus: View {
         }
     }
     var body: some View {
-        Text(message).font(InkStyle.font(10)).foregroundStyle(Color(hex: 0x929889))
+        Text(message).font(InkStyle.font(10)).foregroundStyle(InkStyle.muted)
             .multilineTextAlignment(.center).lineSpacing(4)
             .frame(maxWidth: .infinity).fixedSize(horizontal: false, vertical: true)
     }

@@ -1,6 +1,6 @@
 # 墨驿 Inkpost
 
-当前版本：`0.4.0`
+当前版本：`0.5.0`
 
 > 「墨」承文脉，「驿」管送达——内容驿站：一次投递，各平台分发。
 
@@ -69,7 +69,8 @@ Sources/PublishKit/
   Adapters/             simulate-human.mjs 等 CLI 冒烟辅助
   Fixtures/             模拟平台页面
   DispatchModel.swift   可观察内容、配置与运行状态（不依赖 UI）
-  PlatformRules.swift   平台目标提示词（保持现有分发行为）
+  PlatformRules.swift   通用输入规则（正文、标题需求、图片上限）
+  ChannelContract.swift 固定命令、事件、结果、错误与恢复动作
   Controllers/         DispatchController：协调服务并更新 Model
   Services/            AgentDispatchService / DispatchSettings
 Sources/PublishFlow/
@@ -82,9 +83,9 @@ Sources/flowctl/        CLI（agent-demo / prepare / finalize / cleanup）
 
 采用适配 SwiftUI 的 MVC + Services：View → Controller → Model / Services，View 观察 Model 自动刷新。所有 UI 都放在 Views 中；Controller 不依赖 SwiftUI 或 AppKit，也不实现浏览器脚本、HTTP 或文件读写。平台任务状态统一使用 PublishKit.TargetPhase。
 
-知乎想法使用固定流程：打开首页「分享此刻的想法」，填写完整正文及标签，再将应用图片逐张复制为系统剪贴板 PNG，通过 ego Lite 的 ⌘V 粘贴；每张确认上传完成后再继续。按附件卡片核对数量，仅在应用仍拥有剪贴板变更计数时恢复原内容，保留用户期间的新复制；同一任务恢复不会再次插入已确认的图片。结果不确定时停止并提示检查，最终由用户亲手发布；不使用独立标题，不进入文章页，也不保证平台已持久保存草稿。
+知乎想法使用固定流程：打开首页「分享此刻的想法」，填写并回读核对必填标题，再一次性粘贴完整正文及标签，再将应用图片逐张复制为系统剪贴板 PNG，通过 ego Lite 的 ⌘V 粘贴；每张确认上传完成后再继续。按附件卡片核对数量，仅在应用仍拥有剪贴板变更计数时恢复原内容，保留用户期间的新复制；同一任务恢复不会再次插入已确认的图片。结果不确定时停止并提示检查，最终由用户亲手发布；必须填写独立标题，不进入文章页，也不保证平台已持久保存草稿。
 
-GUI 与 CLI 的 agent-demo 共用 AgentDispatchService.run，Controller 可注入 DispatchServicing 替身进行离线验证。现有确定性 prepare/finalize CLI 适配器保留。帖子持久化尚未接入；简约模式开发已修复正文截断、统一状态，并把模型任意 JS 工具替换为固定只读检查。
+GUI 与 CLI 的 agent-demo 共用 AgentExecutor.run，Controller 可注入 DispatchServicing 替身进行离线验证。现有确定性 prepare/finalize CLI 适配器保留。帖子持久化尚未接入；简约模式开发已修复正文截断、统一状态，并把模型任意 JS 工具替换为固定只读检查。
 
 验证：`swift build`、`swift test`（Swift Testing；CLT 环境补充命令见下文），以及安装 ego Lite 后的 `swift run flowctl agent-demo`。如果旧缓存记录了仓库改名前的路径，可使用 `--scratch-path /tmp/inkpost-mvc-build` 构建与测试，无需删除原缓存。
 
@@ -123,12 +124,28 @@ swift test --disable-xctest --scratch-path /tmp/inkpost-compact-build \
 点击「已填好」成功交还 ego 工作区后，编辑区恢复初始并保留渠道选择；上一份内容、图片和 Space 编号可在投递记录中查看。记录仅在本次运行内保留，不追踪发布结果；交接失败或存在未完成渠道时不清空。下一次填写使用新的 Space。
 
 
-仅选择知乎想法时无需 API Key 或标题；即刻和 X 仍需模型配置，X 最多 4 张图片。完整工作台提供可展开的执行日志与渠道错误详情。
+仅选择知乎想法时无需 API Key，但标题必填；即刻和 X 仍需模型配置，X 最多 4 张图片。完整工作台提供可展开的执行日志与渠道错误详情。
 
 ### 渠道适配器（#9）
 
 `Services/Channels/` 按渠道隔离知乎、即刻、X 和模拟平台。`ChannelAdapter` 统一接收 `ChannelRequest`（标题、完整正文、HTML、标签、素材），声明标题／模型配置需求、图片上限和入口，并负责准备、校验和恢复状态。知乎保留确定性想法流程，其余渠道复用 Agent 执行器。
 
-`AgentDispatchService` 通过 `ChannelRegistry` 查找适配器，负责一个任务的 Space 和各渠道 Page，不包含平台步骤。注册表随新任务创建，恢复时复用原适配器与 Page；Controller 根据能力声明进行启动校验。`PlatformRules` 和历史 prepare 重载保留为兼容入口，生产 Controller 不再构造平台提示词。通用 `EgoBridge` 不含知乎分支，PNG 剪贴板保存与有条件恢复由 `ImageClipboardSession` 复用。
+`AgentDispatchService` 通过 `ChannelRegistry` 查找适配器，负责一个任务的 Space 和各渠道 Page，不包含平台步骤。注册表随新任务创建，恢复时复用原适配器与 Page；Controller 根据能力声明进行启动校验。移除了历史 goal/prepare 重载及主流程二次校验入口；`PlatformRules` 仅校验领域输入，Controller 不构造平台提示词。通用 `EgoBridge` 不含知乎分支，PNG 剪贴板保存与有条件恢复由 `ImageClipboardSession` 复用。
 
 新增渠道：实现适配器并注册，再补充平台标识及展示信息；无需修改核心调度算法。适配器测试使用注入的 Page 工厂，无浏览器／API Key 验证结构化输入、独立失败、页面复用、新任务隔离和能力限制。真实平台仍只填好内容，不自动发布。
+
+### 适配器通信契约
+
+主流程通过 `DispatchServicing.execute` 发送结构化内容及 `prepare` / `resumeAfterUser` 命令；适配器通过 `ChannelExecutionContext` 上报固定阶段、计数进度和诊断事件，返回 `readyForReview`、`waitingForUser` 或 `failed`。错误包含稳定的 `code`、`stage`、`recovery`、具体说明及诊断编号，主流程按枚举处理，展示文案放在 Views。这里使用进程内类型协议，不引入消息队列或事件总线。
+
+`readyForReview` 表示适配器已回读校验完整的渠道转换结果：正文及标签、渠道需要的标题和图片数量。知乎另外逐张等待附件完成；通用图片校验仅证明数量，不证明图片身份或平台持久保存。正文校验保留内部空白，仅规范行尾及首尾空白；平台富文本换行与预期不同会转人工检查，不自动忽略差异或改写内容。
+
+每次调用带任务／渠道／尝试编号；迟到回调不会覆盖当前状态。恢复只接受原内容快照和允许恢复的结果，复用原适配器与 Page。新的任务重建会话。取消停止后续工具和渠道，保留内容；已经发送给浏览器的动作可能完成，取消不等于撤销。填写／上传结果不明时返回 `operationResultUnknown + inspectionRequired`，要求先检查页面再继续，避免自动重复粘贴。完整界面提供停止填写操作。
+
+`AgentExecutor` 独立于分发服务，模型字符串结果只在 Agent 适配器内部转换。共享原生粘贴服务提供互斥租约，PNG 写入按变更计数恢复剪贴板，ego Lite 的文本粘贴使用其原生恢复机制；两者不应同时占用剪贴板。
+
+测试覆盖结构化内容、登录恢复、快照不变性、重复命令、新任务隔离、过期回调、取消传播、剪贴板互斥／恢复以及真实 Fixture 适配器对漏填内容的拒绝。设置 `INKPOST_BROWSER_TESTS=1` 后运行上述 `swift test`，还会通过真实 ego Lite 执行本地 Fixture 适配器（脚本化模型，无 API Key），回读标题／正文／标签／图片并确认没有发布；默认跳过此浏览器测试。真实渠道的登录过期、网络故障及复杂富文本仍需专项回归。
+
+知乎适配器按逻辑编辑块核对完整正文、空格和空段落，避免 innerText 的视觉换行误差。恢复前核对已有标题、正文及已确认附件的远程标识和顺序；发现冲突保留页面并转人工检查，不盲目重复粘贴。平台未声明标题上限时不自行编造限制，实际填写后回读确认。
+
+当前边界待跟进：Controller 仍可能因缺少正文／标题／配置阻止整批开始，PlatformRules 仍在适配器调用前执行渠道校验，Controller 仍含即刻弹窗提示。这些行为尚未达到全部渠道规则独立归适配器的目标。旧的 prepare/goal、独立 verify 接口已移除，库调用方需迁移到 execute 和 ChannelOutcome。

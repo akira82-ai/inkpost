@@ -2,11 +2,17 @@ import Foundation
 
 public struct ChannelCapabilities {
     public let usesTitle: Bool
+    public let requiresTitle: Bool
+    public let maximumTitleCharacters: Int?
+    public let maximumBodyCharacters: Int?
     public let isArticle: Bool
     public let requiresLLM: Bool
     public let entryURL: String?
     public let maximumImages: Int
-    public init(usesTitle: Bool, requiresLLM: Bool, maximumImages: Int, entryURL: String? = nil, isArticle: Bool = false) {
+    public init(usesTitle: Bool, requiresLLM: Bool, maximumImages: Int, entryURL: String? = nil, isArticle: Bool = false, requiresTitle: Bool? = nil, maximumTitleCharacters: Int? = nil, maximumBodyCharacters: Int? = nil) {
+        self.requiresTitle = requiresTitle ?? usesTitle
+        self.maximumTitleCharacters = maximumTitleCharacters
+        self.maximumBodyCharacters = maximumBodyCharacters
         self.isArticle = isArticle
         self.usesTitle = usesTitle; self.requiresLLM = requiresLLM; self.maximumImages = maximumImages; self.entryURL = entryURL
     }

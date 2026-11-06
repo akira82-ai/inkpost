@@ -226,14 +226,14 @@ struct ZhihuAdapterTests {
     private let config = LLMConfig(baseURL: "https://unused.invalid", apiKey: "", model: "unused")
     private let request = ChannelRequest(title: "知乎「标题」& 🖋️", body: "第一段  空格\n\n第二段", tags: ["测试"])
 
-    @Test func missingTitleIsRejectedBeforeAllocatingPage() async throws {
+    @Test func oversizedTitleIsRejectedBeforeAllocatingPage() async throws {
         var pages = 0
         let service = AgentDispatchService(registryFactory: { .init([ZhihuChannelAdapter()]) }, bridgeFactory: { _ in
             pages += 1
             return try EgoBridge(spaceName: "unused", engine: EgoLiteEngine(binaryPath: "/usr/bin/false"))
         })
         let task = UUID(); try await service.beginTask(id: task)
-        let result = try await service.execute(request: .init(title: " \n", body: "正文"), execution: .init(taskID: task, platform: .zhihu), command: .prepare, config: config, onEvent: { _ in })
+        let result = try await service.execute(request: .init(title: String(repeating: "中", count: 45), body: "正文"), execution: .init(taskID: task, platform: .zhihu), command: .prepare, config: config, onEvent: { _ in })
         #expect(result.failure?.code == .contentUnsupported)
         #expect(result.failure?.recovery == .contentChangeRequired)
         #expect(pages == 0)
@@ -261,6 +261,19 @@ struct ZhihuAdapterTests {
         if mode == "bodyConflict" { #expect(!scriptLog.contains("await page.fill")) }
         #expect(!scriptLog.contains("Escape"))
         #expect(!scriptLog.contains("Meta+V")) // zero-image flow
+    }
+
+    @Test func zhihuCharacterBoundariesAndOptionalFields() throws {
+        let capabilities = ZhihuChannelAdapter().capabilities
+        try PlatformRules.validate(.init(title: "", body: "正文"), capabilities: capabilities)
+        try PlatformRules.validate(.init(title: String(repeating: "中", count: 44), body: String(repeating: "文", count: 1899)), capabilities: capabilities)
+        try PlatformRules.validate(.init(title: String(repeating: "🖋️", count: 44), body: "正文"), capabilities: capabilities)
+        for request in [ChannelRequest(title: String(repeating: "中", count: 45), body: "正文"),
+                        .init(title: "", body: String(repeating: "文", count: 1900)),
+                        .init(title: "", body: String(repeating: "文", count: 1898), tags: ["标签"]),
+                        .init(title: "标题", body: " \n")] {
+            #expect(throws: ChannelFailure.self) { try PlatformRules.validate(request, capabilities: capabilities) }
+        }
     }
 
     @Test func logicalParagraphVerificationPreservesWhitespaceAndLimits() throws {

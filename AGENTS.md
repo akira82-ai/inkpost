@@ -70,3 +70,5 @@
 - On an unexpected page or missing capability, preserve content, report the failing step and concrete error, and diagnose before changing the workflow. Log navigation destinations and tool errors without credentials or sensitive clipboard contents. Keep final publication under user control.
 
 - Zhihu verifies logical Draft editor blocks joined by line breaks, preserving spaces and empty paragraphs; visual innerText adds extra newlines and must not drive content equality. Its task-scoped image checkpoints retain remote origin/path identities in order (without signed query strings); changed attachments or uncertain paste results require inspection. Title requirements are independent from article classification. Never invent platform length limits; honor exposed constraints and verify actual title acceptance.
+
+知乎输入约束：标题可空，有则填写，少于 45 字（最多 44）；正文必填，连同追加标签和换行少于 1900 字（最多 1899）；图片可空。按 Swift String.count 的用户可见字符计数，中文一个字计一个字符；超限明确报错，不截断、不生成标题。

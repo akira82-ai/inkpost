@@ -3,7 +3,7 @@ import Foundation
 /// A task-scoped thoughts workflow. Browser writes use ego Lite's native interactions only.
 final class ZhihuChannelAdapter: ChannelAdapter {
     let platform: PlatformID = .zhihu
-    let capabilities = ChannelCapabilities(usesTitle: true, requiresLLM: false, maximumImages: 6, entryURL: "https://www.zhihu.com/")
+    let capabilities = ChannelCapabilities(usesTitle: true, requiresLLM: false, maximumImages: 6, entryURL: "https://www.zhihu.com/", requiresTitle: false, maximumTitleCharacters: 44, maximumBodyCharacters: 1899)
     private static let titleTarget = "textarea[name=\"title\"]"
     private static let bodyTarget = "[contenteditable=\"true\"]"
     private var images = ImageProgress()
@@ -48,7 +48,7 @@ final class ZhihuChannelAdapter: ChannelAdapter {
     }
 
     private func fillTitle(_ title: String, existing: String, bridge: EgoBridge) async throws {
-        guard existing.isEmpty else { return }
+        guard !title.isEmpty, existing.isEmpty else { return }
         _ = try await bridge.fill(target: Self.titleTarget, text: title)
     }
 

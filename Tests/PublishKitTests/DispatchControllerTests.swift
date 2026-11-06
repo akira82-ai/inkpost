@@ -64,12 +64,12 @@ struct DispatchControllerTests {
         #expect(controller.state.overallPhase == .awaitingConfirm)
     }
 
-    @Test func testZhihuRequiresTitleButNotLLMKey() {
+    @Test func testZhihuOptionalTitleDoesNotRequireLLMKey() {
         let controller = makeController(FakeDispatchService())
         controller.state.selectedPlatforms = [.zhihu]
         controller.state.apiKey = ""
         controller.state.title = ""
-        #expect(!controller.canDispatch)
+        #expect(controller.canDispatch)
         controller.state.title = "想法标题"
         #expect(controller.canDispatch)
         controller.state.selectedPlatforms = [.zhihu, .x]

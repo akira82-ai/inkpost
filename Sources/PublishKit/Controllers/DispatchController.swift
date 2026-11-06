@@ -30,7 +30,7 @@ public final class DispatchController {
     }
 
     public var canDispatch: Bool {
-        state.overallPhase == .pending && !state.isHandingOff && !state.selectedPlatforms.isEmpty && (!state.selectedPlatforms.contains(where: { service.capabilities(for: $0)?.usesTitle == true }) || !state.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) && !state.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (!requiresModelConfiguration || !state.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        state.overallPhase == .pending && !state.isHandingOff && !state.selectedPlatforms.isEmpty && (!state.selectedPlatforms.contains(where: { service.capabilities(for: $0)?.requiresTitle == true }) || !state.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) && !state.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (!requiresModelConfiguration || !state.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 
     public func saveConfig() {

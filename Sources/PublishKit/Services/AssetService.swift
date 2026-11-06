@@ -3,6 +3,11 @@ import CryptoKit
 import ImageIO
 import UniformTypeIdentifiers
 
+public enum AssetImportError: LocalizedError {
+    case limitReached
+    public var errorDescription: String? { "最多添加 6 张图片" }
+}
+
 public final class AssetService {
     private let root: URL
     public init(root: URL = FileManager.default.temporaryDirectory.appendingPathComponent("inkpost-assets")) { self.root = root }
@@ -15,7 +20,7 @@ public final class AssetService {
             let bytes = try Data(contentsOf: URL(fileURLWithPath: path))
             if SHA256.hash(data: bytes) == SHA256.hash(data: data) { return nil }
         }
-        guard existing.count < 6 else { throw NSError(domain: "Inkpost", code: 2, userInfo: [NSLocalizedDescriptionKey: "最多添加 6 张图片"]) }
+        guard existing.count < 6 else { throw AssetImportError.limitReached }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let type = CGImageSourceGetType(source) as String? ?? ""
         let ext = UTType(type)?.preferredFilenameExtension ?? "image"

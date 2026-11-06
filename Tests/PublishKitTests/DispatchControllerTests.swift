@@ -136,6 +136,38 @@ struct DispatchControllerTests {
         #expect(defaults.string(forKey: "deepseek.apiKey") == "key")
         #expect(settings.load().model == "model")
     }
+
+    @Test func testImageBatchReportsAddedDuplicatesAndAllOverflow() throws {
+        let controller = makeController(FakeDispatchService())
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let png = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")!
+        var paths: [String] = []
+        for index in UInt8(0)..<8 {
+            let file = root.appendingPathComponent("\(index).png")
+            var data = png; data.append(index)
+            try data.write(to: file); paths.append(file.path)
+        }
+        // A duplicate encountered after reaching the limit must remain a duplicate.
+        controller.addAssets(paths + [paths[0]])
+        #expect(controller.state.assetPaths.count == 6)
+        #expect(controller.state.assetData.count == 6)
+        #expect(controller.state.notice == "已添加 6 张图片；该图片已经添加；最多 6 张，2 张未添加")
+    }
+
+    @Test func testInvalidImageDoesNotDiscardRestOfBatch() throws {
+        let controller = makeController(FakeDispatchService())
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let invalid = root.appendingPathComponent("broken.png")
+        try Data("invalid image".utf8).write(to: invalid)
+        let valid = root.appendingPathComponent("valid.png")
+        try Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")!.write(to: valid)
+        controller.addAssets([invalid.path, valid.path])
+        #expect(controller.state.assetPaths.count == 1)
+        #expect(controller.state.notice?.contains("已添加 1 张图片") == true)
+        #expect(controller.state.notice?.contains("broken.png：无法读取这张图片") == true)
+    }
 }
 
 @MainActor

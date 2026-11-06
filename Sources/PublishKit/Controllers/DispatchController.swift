@@ -31,7 +31,7 @@ public final class DispatchController {
         state.overallPhase == .pending && !state.selectedPlatforms.isEmpty && (!state.selectedPlatforms.contains(where: { $0.isArticle }) || !state.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) && !state.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !state.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    func saveConfig() {
+    public func saveConfig() {
         settings.save(apiKey: state.apiKey, model: state.model)
     }
 
@@ -44,12 +44,23 @@ public final class DispatchController {
 
     public func addAssets(_ paths: [String]) {
         guard state.overallPhase == .pending else { return }
-        var added = 0, duplicate = 0
+        var added = 0, duplicate = 0, overflow = 0
+        var errors: [String] = []
         for path in paths {
-            do { if let imported = try assets.importFile(path, existing: state.assetPaths) { state.assetPaths.append(imported); state.assetData[imported] = try assets.previewData(imported); added += 1 } else { duplicate += 1 } }
-            catch { state.notice = error.localizedDescription; return }
+            do {
+                if let imported = try assets.importFile(path, existing: state.assetPaths) {
+                    let preview = try assets.previewData(imported)
+                    state.assetPaths.append(imported); state.assetData[imported] = preview; added += 1
+                } else { duplicate += 1 }
+            } catch AssetImportError.limitReached { overflow += 1 }
+            catch { errors.append("\(URL(fileURLWithPath: path).lastPathComponent)：\(error.localizedDescription)") }
         }
-        state.notice = duplicate > 0 ? "\(duplicate) 张图片已经添加" : "已添加 \(added) 张图片"
+        var messages: [String] = []
+        if added > 0 { messages.append("已添加 \(added) 张图片") }
+        if duplicate > 0 { messages.append(duplicate == 1 ? "该图片已经添加" : "\(duplicate) 张图片已经添加") }
+        if overflow > 0 { messages.append("最多 6 张，\(overflow) 张未添加") }
+        messages.append(contentsOf: errors)
+        if !messages.isEmpty { state.notice = messages.joined(separator: "；") }
     }
 
     public func pasteImage(_ data: Data) {

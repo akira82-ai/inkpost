@@ -34,7 +34,7 @@ struct DispatchControllerTests {
         #expect(controller.state.platformPhase[.jike] == .needLogin)
         #expect(controller.state.platformPhase[.x] == .failed)
         #expect(service.requests[0].body == "Test **body**")
-        #expect(service.requests[0].tags == ["swift", "macOS"])
+        #expect(service.requests[0].tags == "#swift #macOS")
         #expect(service.requests[1] == service.requests[0])
         #expect(service.requests[2] == service.requests[0])
     }
@@ -105,6 +105,58 @@ struct DispatchControllerTests {
         #expect(service.requests.count == 3)
     }
 
+
+    @Test func testRawInputSnapshotSurvivesDispatchAndResume() async throws {
+        let service = FakeDispatchService()
+        service.statuses[.x] = "needLogin"
+        let controller = makeController(service)
+        let title = "  标题 🖋️  "
+        let body = "  **正文**\n\n\n  ```swift\n  let x = 1\n  ```\n尾部  \n"
+        let tags = "  #AI\t##工具\n #中文  "
+        let paths = ["/tmp/second.png", "/tmp/first.png"]
+        controller.state.title = title
+        controller.state.markdown = body
+        controller.state.tagsText = tags
+        controller.state.assetPaths = paths
+        controller.dispatch()
+        try await waitForDispatch(controller)
+        controller.state.title = "changed"
+        controller.state.markdown = "changed"
+        controller.state.tagsText = "changed"
+        controller.state.assetPaths = []
+        service.statuses[.x] = "draftReady"
+        controller.resume(.x)
+        try await waitForDispatch(controller)
+        #expect(service.requests.count == 4)
+        for request in service.requests {
+            #expect(request.title == title)
+            #expect(request.body == body)
+            #expect(request.tags == tags)
+            #expect(request.html.isEmpty)
+            #expect(request.assets == paths)
+        }
+    }
+
+    @Test func testEmptyOptionalFieldsRemainEmpty() async throws {
+        let service = FakeDispatchService()
+        let controller = makeController(service)
+        controller.state.title = ""
+        controller.state.tagsText = ""
+        controller.state.assetPaths = []
+        controller.dispatch()
+        try await waitForDispatch(controller)
+        #expect(service.requests.count == 3)
+        #expect(service.requests.allSatisfy { $0.title.isEmpty && $0.tags.isEmpty && $0.html.isEmpty && $0.assets.isEmpty })
+    }
+
+    @Test func testWhitespaceOnlyBodyIsRejectedWithoutMutation() {
+        let service = FakeDispatchService()
+        let controller = makeController(service)
+        controller.state.markdown = " \n\t "
+        controller.dispatch()
+        #expect(service.requests.isEmpty)
+        #expect(controller.state.markdown == " \n\t ")
+    }
 
     @Test func testVerificationFailureIsNotReportedAsFilled() async throws {
         let service = FakeDispatchService()
@@ -293,7 +345,7 @@ private final class FakeDispatchService: DispatchServicing {
     var executions: [ChannelExecutionID] = []
     var requests: [ChannelRequest] = []
     var bodies: [String] = []
-    var tagSnapshots: [[String]] = []
+    var tagSnapshots: [String] = []
     var assetSnapshots: [[String]] = []
     func beginTask(id: UUID) async throws {}
     func resumeControl() async throws {}

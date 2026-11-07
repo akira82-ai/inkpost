@@ -5,10 +5,18 @@ import Testing
 
 @MainActor
 struct XChannelAdapterTests {
+    @Test func tagFormattingDoesNotMutateRawRequest() {
+        let request = ChannelRequest(title: " Title ", body: " Body\n\n ", html: " <p>unused</p> ", tags: "  #AI\t##工具\n #中文  ")
+        let original = request
+        #expect(XChannelAdapter().expectedBody(for: request) == " Title \n Body\n\n \n\n#AI #工具 #中文")
+        #expect(request == original)
+        #expect(request.tags == "  #AI\t##工具\n #中文  ")
+    }
+
     @Test func compositionAndLimitsPreserveInput() throws {
         let adapter = XChannelAdapter()
 
-        #expect(adapter.expectedBody(for: .init(title: " 标题 ", body: " 正文\n\n  尾 ", tags: ["swift"])) == " 标题 \n 正文\n\n  尾 \n\n#swift")
+        #expect(adapter.expectedBody(for: .init(title: " 标题 ", body: " 正文\n\n  尾 ", tags: "swift")) == " 标题 \n 正文\n\n  尾 \n\n#swift")
         #expect(adapter.expectedBody(for: .init(title: "", body: "正文")) == "正文")
         try adapter.validate(.init(title: "", body: String(repeating: "中", count: 1899), assets: ["1","2","3","4"]))
         #expect(throws: ChannelFailure.self) { try adapter.validate(.init(title: "题", body: String(repeating: "中", count: 1898))) }
@@ -23,7 +31,7 @@ struct XChannelAdapterTests {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let binary = dir.appendingPathComponent("x-stub")
         let log = dir.appendingPathComponent("log")
-        let request = ChannelRequest(title: "标题", body: " 正文\n\n尾 ", tags: ["x"])
+        let request = ChannelRequest(title: "标题", body: " 正文\n\n尾 ", tags: "x")
         let expected = XChannelAdapter().expectedBody(for: request)
         let source = """
         #!/usr/bin/python3
@@ -82,7 +90,7 @@ struct XChannelAdapterTests {
             try #require(bitmap.representation(using: .png, properties: [:])).write(to: path); paths.append(path.path)
         }
         let bridge = try EgoBridge(spaceName: try #require(ProcessInfo.processInfo.environment["INKPOST_X_LIVE_SPACE"]), engine: EgoLiteEngine(), pageLabel: try #require(ProcessInfo.processInfo.environment["INKPOST_X_LIVE_PAGE"]))
-        let request = ChannelRequest(title: "墨驿 X 适配器验证", body: "  保留空格\n\n仅填写，不发布。", tags: ["测试"], assets: paths)
+        let request = ChannelRequest(title: "墨驿 X 适配器验证", body: "  保留空格\n\n仅填写，不发布。", tags: "测试", assets: paths)
         let prepared = try AssetService.preparePNGAssets(request.assets)
         for command in [ChannelCommand.prepare, .resumeAfterUser] {
             let context = ChannelExecutionContext(execution: .init(taskID: UUID(), platform: .x), command: command, bridge: bridge, preparedAssets: prepared.assets,

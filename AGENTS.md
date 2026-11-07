@@ -79,7 +79,7 @@
 ## X channel
 
 - X uses a deterministic compose adapter without LLM configuration. Read [X adapter maintenance](Sources/PublishKit/Services/Channels/XChannelAdapter.md) before changing it. Optional title is prepended to the first line; composed text including tags is limited to 1899 user-visible characters by product decision, with at most four pasted images. Verify actual editor acceptance and stop before Post.
-- Dispatch preserves the raw body, including Markdown and whitespace, when creating ChannelRequest. HTML generation and raw tag delivery remain separate follow-up work under #13.
+- Dispatch preserves raw title, body, tag input and ordered source assets in ChannelRequest. Tags are a raw String, not a parsed array; only adapters opt into tag formatting. Dispatch does not generate HTML; explicitly supplied HTML remains unchanged. Task-prepared PNG mappings stay separate from the original request.
 
 ## Deterministic channel execution
 

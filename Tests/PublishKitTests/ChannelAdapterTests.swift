@@ -15,7 +15,7 @@ struct ChannelAdapterTests {
         let service = DispatchService(registryFactory: { .init([adapter]) }, bridgeFactory: { _ in pages += 1; return try bridge() })
         let task = UUID()
         try await service.beginTask(id: task)
-        let request = ChannelRequest(title: "Title", body: "Complete\nbody", html: "<p>Complete</p>", tags: ["swift"], assets: [try testAssetFile(type: .tiff).path])
+        let request = ChannelRequest(title: "Title", body: "Complete\nbody", html: "  <p>Complete</p>\n", tags: "  #swift\t##中文  ", assets: [try testAssetFile(type: .tiff).path])
         let first = try await service.execute(request: request, execution: .init(taskID: task, platform: .weibo), command: .prepare, onEvent: { _ in })
         #expect(first.failure?.code == .loginRequired)
         let invalid = try await service.execute(request: .init(title: "", body: "changed"), execution: .init(taskID: task, platform: .weibo), command: .resumeAfterUser, onEvent: { _ in })
@@ -71,7 +71,7 @@ struct ChannelAdapterTests {
         let source = try testAssetFile(type: .tiff)
         let original = try Data(contentsOf: source)
         let otherSource = try testAssetFile(type: .jpeg)
-        let request = ChannelRequest(title: " title ", body: " body\n\n ", html: "<p>unused</p>", tags: ["tag"], assets: [source.path, otherSource.path])
+        let request = ChannelRequest(title: " title ", body: " body\n\n ", html: "<p>unused</p>", tags: "tag", assets: [source.path, otherSource.path])
         let task = UUID(); try await service.beginTask(id: task)
         _ = try await service.execute(request: request, execution: .init(taskID: task, platform: .weibo), command: .prepare, onEvent: { _ in })
         let paths = try #require(first.uploads.first)
@@ -217,7 +217,7 @@ struct ClipboardContractTests {
 @MainActor
 struct ZhihuAdapterTests {
 
-    private let request = ChannelRequest(title: "知乎「标题」& 🖋️", body: "第一段  空格\n\n第二段", tags: ["测试"])
+    private let request = ChannelRequest(title: "知乎「标题」& 🖋️", body: "第一段  空格\n\n第二段", tags: "测试")
 
     @Test func oversizedTitleIsRejectedBeforeAllocatingPage() async throws {
         var pages = 0
@@ -263,7 +263,7 @@ struct ZhihuAdapterTests {
         try PlatformRules.validate(.init(title: String(repeating: "🖋️", count: 44), body: "正文"), capabilities: capabilities)
         for request in [ChannelRequest(title: String(repeating: "中", count: 45), body: "正文"),
                         .init(title: "", body: String(repeating: "文", count: 1900)),
-                        .init(title: "", body: String(repeating: "文", count: 1898), tags: ["标签"]),
+                        .init(title: "", body: String(repeating: "文", count: 1898), tags: "标签"),
                         .init(title: "标题", body: " \n")] {
             #expect(throws: ChannelFailure.self) { try PlatformRules.validate(request, capabilities: capabilities) }
         }
@@ -372,7 +372,7 @@ struct DeterministicFixtureTests {
             try EgoBridge(spaceName: "fixture-stub", engine: EgoLiteEngine(binaryPath: binary.path))
         })
         let task = UUID(); try await service.beginTask(id: task)
-        let result = try await service.execute(request: .init(title: "Title", body: " Body\n\n tail ", html: "<p>unused</p>", tags: ["swift"], assets: [try testAssetFile().path]),
+        let result = try await service.execute(request: .init(title: "Title", body: " Body\n\n tail ", html: "<p>unused</p>", tags: "swift", assets: [try testAssetFile().path]),
             execution: .init(taskID: task, platform: .simFixture), command: .prepare, onEvent: { _ in })
         if defect == "valid" { #expect(result == .readyForReview(message: "模拟平台已填好")) }
         else if defect == "writeFailure" {
@@ -389,7 +389,7 @@ struct DeterministicFixtureTests {
         try Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")!.write(to: image)
         let service = DispatchService(registryFactory: { .init([FixtureChannelAdapter()]) })
         let task = UUID(); try await service.beginTask(id: task)
-        let result = try await service.execute(request: .init(title: "Fixture smoke", body: "Complete body", tags: ["swift"], assets: [image.path]),
+        let result = try await service.execute(request: .init(title: "Fixture smoke", body: "Complete body", tags: "swift", assets: [image.path]),
             execution: .init(taskID: task, platform: .simFixture), command: .prepare, onEvent: { _ in })
         #expect(result == .readyForReview(message: "模拟平台已填好"))
         let id = try #require(service.workspaceID)

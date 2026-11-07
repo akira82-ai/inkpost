@@ -21,13 +21,12 @@ public struct ChannelRequest: Equatable, Sendable {
     public let title: String
     public let body: String
     public let html: String
-    public let tags: [String]
+    /// Exact user input; interpretation belongs to each channel workflow.
+    public let tags: String
     public let assets: [String]
-    public init(title: String, body: String, html: String = "", tags: [String] = [], assets: [String] = []) {
+    public init(title: String, body: String, html: String = "", tags: String = "", assets: [String] = []) {
         self.title = title; self.body = body; self.html = html; self.tags = tags; self.assets = assets
     }
-    public var tagText: String { tags.map { "#" + $0.trimmingCharacters(in: CharacterSet(charactersIn: "#")) }.joined(separator: " ") }
-    public var taggedBody: String { body + (tags.isEmpty ? "" : "\n\n" + tagText) }
 }
 
 public protocol ChannelAdapter: AnyObject {
@@ -46,5 +45,20 @@ public struct ChannelRegistry {
     public func adapter(for platform: PlatformID) -> (any ChannelAdapter)? { adapters[platform] }
     public static var standard: ChannelRegistry {
         .init([ZhihuChannelAdapter(), JikeChannelAdapter(), XChannelAdapter(), FixtureChannelAdapter()])
+    }
+}
+
+/// Shared opt-in formatting used by the existing plain-text channel workflows.
+/// The request remains unchanged; each adapter chooses whether to use this representation.
+extension ChannelRequest {
+    public var tagText: String {
+        tags.split(whereSeparator: { $0.isWhitespace })
+            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "#")) }
+            .filter { !$0.isEmpty }
+            .map { "#" + $0 }.joined(separator: " ")
+    }
+    public var taggedBody: String {
+        let formatted = tagText
+        return body + (formatted.isEmpty ? "" : "\n\n" + formatted)
     }
 }

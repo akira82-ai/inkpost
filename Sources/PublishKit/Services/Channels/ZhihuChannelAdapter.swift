@@ -12,6 +12,7 @@ final class ZhihuChannelAdapter: ChannelAdapter {
     func execute(request: ChannelRequest, context: ChannelExecutionContext) async throws -> ChannelOutcome {
         try context.advance(.validatingRequest)
         try PlatformRules.validate(request, capabilities: capabilities)
+        let uploadPaths = try context.uploadPaths(for: request)
         try context.advance(.openingEditor)
         context.diagnostic("打开知乎首页，定位「分享此刻的想法」")
         let raw = try await Self.navigate(bridge: context.bridge, url: capabilities.entryURL!)
@@ -36,7 +37,7 @@ final class ZhihuChannelAdapter: ChannelAdapter {
         context.diagnostic("标题、完整正文与标签已回读核对")
 
         try context.advance(.uploadingAssets)
-        try await uploadImages(request.assets, context: context)
+        try await uploadImages(uploadPaths, context: context)
         try context.advance(.verifyingContent)
         let final = try await readPage(context.bridge)
         try final.checkContent(request, allowEmpty: false)

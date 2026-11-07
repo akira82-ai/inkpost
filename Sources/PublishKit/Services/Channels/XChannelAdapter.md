@@ -20,3 +20,5 @@
 - Live login expiration, network failure, four-image upload and concurrent clipboard modification still require fault-injection coverage. Blob preview + enabled Post is a UI readiness check, not server-side publication or durable draft proof.
 
 - 2026-11-07: shared execution contracts no longer carry model configuration or a model-requirement capability. Browser steps and channel input rules are unchanged; offline regressions passed, with no live platform writes in this cleanup.
+
+- PNG preparation contract (#30): AssetService prepares the complete ordered PNG batch before browser execution. Receive the unchanged original ChannelRequest and obtain final PNG upload paths through `context.uploadPaths(for:)`. Never convert formats, repair input, or fall back to original files in this adapter. DispatchService retains the same batch during login waits and resume. Clipboard writes copy validated PNG bytes unchanged.

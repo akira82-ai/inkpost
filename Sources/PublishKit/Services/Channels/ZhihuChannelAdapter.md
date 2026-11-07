@@ -25,3 +25,5 @@ Read this document before changing `ZhihuChannelAdapter.swift`. Common architect
 - Verify logical Draft blocks joined by line breaks, preserving spaces and empty paragraphs; visual innerText is not the equality source. Recovery checkpoints compare ordered remote attachment origin/path identities without signed queries; replacement, reordering or unknown paste outcomes require inspection.
 
 - 2026-11-07: shared execution contracts no longer carry model configuration or a model-requirement capability. Browser steps and channel input rules are unchanged; offline regressions passed, with no live platform writes in this cleanup.
+
+- PNG preparation contract (#30): AssetService prepares the complete ordered PNG batch before browser execution. Receive the unchanged original ChannelRequest and obtain final PNG upload paths through `context.uploadPaths(for:)`. Never convert formats, repair input, or fall back to original files in this adapter. DispatchService retains the same batch during login waits and resume. Clipboard writes copy validated PNG bytes unchanged.

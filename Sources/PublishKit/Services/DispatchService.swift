@@ -14,6 +14,8 @@ public protocol DispatchServicing {
 @MainActor
 public final class DispatchService: DispatchServicing {
     private var taskID: UUID?
+    private var taskRequest: ChannelRequest?
+    private var assetPreparation: Task<PreparedAssetBatch, Error>?
     private var sessions: [PlatformID: (request: ChannelRequest, outcome: ChannelOutcome)] = [:]
     private var activeAttempts: [PlatformID: UUID] = [:]
     private var bridges: [PlatformID: EgoBridge] = [:]
@@ -32,6 +34,8 @@ public final class DispatchService: DispatchServicing {
     }
     public func beginTask(id: UUID) async throws {
         guard activeAttempts.isEmpty else { throw ChannelFailure(code: .invalidCommand, stage: .validatingRequest, detail: "仍有渠道执行中", recovery: .notRecoverable) }
+        assetPreparation?.cancel()
+        assetPreparation = nil; taskRequest = nil
         taskID = id; sessions = [:]
         spaceName = "inkpost \(UUID().uuidString)"
         bridges = [:]; spaceID = nil; handedOff = false
@@ -83,6 +87,9 @@ public final class DispatchService: DispatchServicing {
             return .failed(.init(code: .invalidCommand, stage: .validatingRequest, detail: "任务不匹配或渠道正在执行", recovery: .notRecoverable))
         }
         let platform = execution.platform
+        guard taskRequest == nil || taskRequest == request else {
+            return .failed(.init(code: .invalidCommand, stage: .validatingRequest, detail: "任务输入快照已改变", recovery: .notRecoverable))
+        }
         let previous = sessions[platform]
         guard command == .prepare ? previous == nil : (previous?.request == request && previous?.outcome.canResume == true) else {
             return .failed(.init(code: .invalidCommand, stage: .validatingRequest, detail: "无法以当前内容重复开始或恢复此渠道", recovery: .notRecoverable))
@@ -94,10 +101,21 @@ public final class DispatchService: DispatchServicing {
         do {
             let adapter = try requiredAdapter(platform)
             try PlatformRules.validate(request, capabilities: adapter.capabilities)
+            if assetPreparation == nil {
+                taskRequest = request
+                onEvent(.init(execution: execution, payload: .diagnostic("统一准备 \(request.assets.count) 张 PNG 上传素材")))
+                assetPreparation = Task.detached { try AssetService.preparePNGAssets(request.assets) }
+            }
+            let preparation = assetPreparation!
+            let batch = try await withTaskCancellationHandler {
+                try await preparation.value
+            } onCancel: { preparation.cancel() }
+            try Task.checkCancellation()
+            guard taskID == execution.taskID else { throw CancellationError() }
             onEvent(.init(execution: execution, payload: .stage(.openingEditor)))
             let bridge = try await bridge(for: platform)
             guard taskID == execution.taskID else { throw CancellationError() }
-            context = ChannelExecutionContext(execution: execution, command: command, bridge: bridge, onEvent: onEvent)
+            context = ChannelExecutionContext(execution: execution, command: command, bridge: bridge, preparedAssets: batch.assets, onEvent: onEvent)
         } catch {
             if error is CancellationError || Task.isCancelled { throw CancellationError() }
             let failure = (error as? ChannelFailure) ?? .init(code: .executionFailed, stage: .openingEditor, detail: error.localizedDescription, recovery: .retryAllowed)

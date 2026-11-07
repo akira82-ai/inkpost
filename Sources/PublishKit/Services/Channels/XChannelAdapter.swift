@@ -25,6 +25,7 @@ final class XChannelAdapter: ChannelAdapter {
     func execute(request: ChannelRequest, context: ChannelExecutionContext) async throws -> ChannelOutcome {
         try context.advance(.validatingRequest)
         try validate(request)
+        let uploadPaths = try context.uploadPaths(for: request)
         try context.advance(.openingEditor)
         let raw = try await context.bridge.run("""
             // x:open-editor
@@ -68,7 +69,7 @@ final class XChannelAdapter: ChannelAdapter {
                 try validateImages(state.images)
                 if index < confirmedImages.count { continue }
                 if !pendingImage {
-                    try clipboard.writePNG(path: request.assets[index])
+                    try clipboard.writePNG(path: uploadPaths[index])
                     pendingImage = true
                     _ = try await context.bridge.run("""
                         // x:paste-image

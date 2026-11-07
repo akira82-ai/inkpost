@@ -61,12 +61,20 @@ public final class ChannelExecutionContext {
     public let execution: ChannelExecutionID
     public let command: ChannelCommand
     public let bridge: EgoBridge
+    public let preparedAssets: [PreparedAsset]
     public private(set) var stage: ChannelStage = .validatingRequest
     private let onEvent: @MainActor @Sendable (ChannelEvent) -> Void
     private var active = true
-    public init(execution: ChannelExecutionID, command: ChannelCommand, bridge: EgoBridge,
+    public init(execution: ChannelExecutionID, command: ChannelCommand, bridge: EgoBridge, preparedAssets: [PreparedAsset] = [],
                 onEvent: @escaping @MainActor @Sendable (ChannelEvent) -> Void) {
-        self.execution = execution; self.command = command; self.bridge = bridge; self.onEvent = onEvent
+        self.execution = execution; self.command = command; self.bridge = bridge; self.preparedAssets = preparedAssets; self.onEvent = onEvent
+    }
+    public func uploadPaths(for request: ChannelRequest) throws -> [String] {
+        guard preparedAssets.map(\.sourcePath) == request.assets else {
+            throw ChannelFailure(code: .invalidCommand, stage: .validatingRequest,
+                detail: "任务 PNG 素材尚未准备或与原始输入不一致", recovery: .notRecoverable)
+        }
+        return preparedAssets.map(\.pngPath)
     }
     public func advance(_ stage: ChannelStage) throws {
         try Task.checkCancellation()

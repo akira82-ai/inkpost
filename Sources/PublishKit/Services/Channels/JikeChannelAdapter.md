@@ -5,7 +5,7 @@
 - Deterministic inline thoughts composer at `https://web.okjike.com/following`. No model service. Receive the complete ChannelRequest; use raw body and appended tags, leave title and HTML unused (no independent title field). Do not invent a title or merge it into body.
 - Body required; images optional. No verified platform length/image ceiling is asserted; product editor currently selects at most six assets. Pass every selected image and check actual acceptance; never truncate or drop attachments.
 - Circle selection is left to the user; do not choose suggested circles automatically. This adapter does not implement circle search, video or link-card creation.
-- Upload the supplied asset files unchanged. Do not detect, convert or repair image formats in this adapter; format preparation belongs upstream. If the page cannot accept or verify an attachment, report failure and preserve the page instead of transforming or retrying it.
+- Upload the task-prepared PNG files unchanged. Do not detect, convert or repair image formats in this adapter; format preparation belongs upstream. If the page cannot accept or verify an attachment, report failure and preserve the page instead of transforming or retrying it.
 
 
 ## Verified interactions
@@ -23,4 +23,6 @@
 - Live acceptance is opt-in via INKPOST_JIKE_LIVE, INKPOST_JIKE_SPACE and INKPOST_JIKE_PAGE. Use an agent-owned fresh Page, a generated `/tmp/inkpost-jike-probe.png` and a second generated image, and leave the filled page for review; never send.
 - Actual logged-out UI, login expiry during upload, interrupted network, six-image upload, and user attachment replacement remain live fault-injection work. Login detection uses observed editor availability plus explicit login routes/buttons; unexpected pages must fail visibly rather than being assumed logged out.
 - Manual image paste and native PNG chooser upload were verified. Direct TIFF upload enabled Send but produced an undecodable preview; this remains a failure, not a reason for adapter-side conversion. Earlier TIFF-to-PNG live success tested a conversion that has since been removed and does not establish raw TIFF support.
-- INKPOST_JIKE_ASSET overrides the first live asset. Offline tests assert the original path and bytes are preserved, with no duplicate uploads on recovery.
+- INKPOST_JIKE_ASSET overrides the first live asset. Offline tests assert original bytes are preserved, prepared PNG paths are uploaded, and recovery does not duplicate uploads.
+
+- PNG preparation contract (#30): AssetService prepares the complete ordered PNG batch before browser execution. Receive the unchanged original ChannelRequest and obtain final PNG upload paths through `context.uploadPaths(for:)`. Never convert formats, repair input, or fall back to original files in this adapter. DispatchService retains the same batch during login waits and resume. Clipboard writes copy validated PNG bytes unchanged.

@@ -23,6 +23,7 @@ final class JikeChannelAdapter: ChannelAdapter {
     func execute(request: ChannelRequest, context: ChannelExecutionContext) async throws -> ChannelOutcome {
         try context.advance(.validatingRequest)
         try validate(request)
+        let uploadPaths = try context.uploadPaths(for: request)
         try context.advance(.openingEditor)
         context.diagnostic("打开即刻关注页，定位「分享你的想法…」编辑器")
         let raw = try await context.bridge.run("""
@@ -78,7 +79,7 @@ final class JikeChannelAdapter: ChannelAdapter {
                     const chooserPromise = page.waitForFileChooser({timeout:10000});
                     await page.click('form [title="图片"]', {label:'添加即刻下一张图片'});
                     const chooser = await chooserPromise;
-                    await chooser.setFiles(\(context.bridge.jsStr(request.assets[index])));
+                    await chooser.setFiles(\(context.bridge.jsStr(uploadPaths[index])));
                     cliLog(JSON.stringify({ok:true}));
                     """)
             }

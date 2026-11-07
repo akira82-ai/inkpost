@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import UniformTypeIdentifiers
 import Testing
 @testable import PublishKit
 
@@ -14,7 +15,7 @@ struct ChannelAdapterTests {
         let service = DispatchService(registryFactory: { .init([adapter]) }, bridgeFactory: { _ in pages += 1; return try bridge() })
         let task = UUID()
         try await service.beginTask(id: task)
-        let request = ChannelRequest(title: "Title", body: "Complete\nbody", html: "<p>Complete</p>", tags: ["swift"], assets: ["image"])
+        let request = ChannelRequest(title: "Title", body: "Complete\nbody", html: "<p>Complete</p>", tags: ["swift"], assets: [try testAssetFile(type: .tiff).path])
         let first = try await service.execute(request: request, execution: .init(taskID: task, platform: .weibo), command: .prepare, onEvent: { _ in })
         #expect(first.failure?.code == .loginRequired)
         let invalid = try await service.execute(request: .init(title: "", body: "changed"), execution: .init(taskID: task, platform: .weibo), command: .resumeAfterUser, onEvent: { _ in })
@@ -23,6 +24,7 @@ struct ChannelAdapterTests {
         #expect(second == .readyForReview(message: "verified"))
         #expect(adapter.requests == [request, request])
         #expect(adapter.commands == [.prepare, .resumeAfterUser])
+        #expect(adapter.uploads.count == 2 && adapter.uploads[0] == adapter.uploads[1])
         #expect(pages == 1)
         let duplicate = try await service.execute(request: request, execution: .init(taskID: task, platform: .weibo), command: .prepare, onEvent: { _ in })
         #expect(duplicate.failure?.code == .invalidCommand)
@@ -62,6 +64,59 @@ struct ChannelAdapterTests {
         #expect(created[1].requests.count == 1 && created[2].requests.count == 1)
     }
 
+    @Test func channelsSharePreparedAssetsAndNewTasksUseFreshFiles() async throws {
+        let first = RecordingAdapter(maximumImages: 2)
+        let second = RecordingAdapter(platform: .jike, maximumImages: 2)
+        let service = DispatchService(registryFactory: { .init([first, second]) }, bridgeFactory: { _ in try bridge() })
+        let source = try testAssetFile(type: .tiff)
+        let original = try Data(contentsOf: source)
+        let otherSource = try testAssetFile(type: .jpeg)
+        let request = ChannelRequest(title: " title ", body: " body\n\n ", html: "<p>unused</p>", tags: ["tag"], assets: [source.path, otherSource.path])
+        let task = UUID(); try await service.beginTask(id: task)
+        _ = try await service.execute(request: request, execution: .init(taskID: task, platform: .weibo), command: .prepare, onEvent: { _ in })
+        let paths = try #require(first.uploads.first)
+        // Prepared bytes are stable even if the original file changes after preparation.
+        try Data("changed original".utf8).write(to: source)
+        _ = try await service.execute(request: request, execution: .init(taskID: task, platform: .jike), command: .prepare, onEvent: { _ in })
+        #expect(first.requests == [request] && second.requests == [request])
+        #expect(second.uploads == [paths])
+        #expect(paths.count == 2 && paths[0] != paths[1])
+        _ = try AssetService.validatedPNG(Data(contentsOf: URL(fileURLWithPath: paths[0])))
+        let nextTask = UUID()
+        try await service.beginTask(id: nextTask)
+        #expect(!FileManager.default.fileExists(atPath: paths[0]))
+        #expect(FileManager.default.fileExists(atPath: source.path))
+        try original.write(to: source)
+        _ = try await service.execute(request: request, execution: .init(taskID: nextTask, platform: .weibo), command: .prepare, onEvent: { _ in })
+        #expect(first.uploads.last != paths)
+    }
+
+    @Test func preparationFailureBlocksEveryChannelBeforeBrowser() async throws {
+        let first = RecordingAdapter()
+        let second = RecordingAdapter(platform: .jike)
+        var pages = 0
+        let service = DispatchService(registryFactory: { .init([first, second]) }, bridgeFactory: { _ in pages += 1; return try bridge() })
+        let task = UUID(); try await service.beginTask(id: task)
+        let missing = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".tiff")
+        let request = ChannelRequest(title: "", body: "Body", assets: [missing.path])
+        let failure = try await service.execute(request: request, execution: .init(taskID: task, platform: .weibo), command: .prepare, onEvent: { _ in })
+        #expect(failure.failure?.stage == .validatingRequest)
+        // Fixing an external path must not silently alter the failed task's snapshot.
+        try Data(contentsOf: testAssetFile()).write(to: missing)
+        let other = try await service.execute(request: request, execution: .init(taskID: task, platform: .jike), command: .prepare, onEvent: { _ in })
+        #expect(other == failure)
+        #expect(pages == 0 && first.requests.isEmpty && second.requests.isEmpty)
+    }
+
+    @Test func adapterRejectsUnpreparedImagesBeforeBrowser() async throws {
+        let request = ChannelRequest(title: "Title", body: "Body", assets: [try testAssetFile(type: .tiff).path])
+        for adapter in [ZhihuChannelAdapter(), XChannelAdapter(), JikeChannelAdapter(), FixtureChannelAdapter()] as [any ChannelAdapter] {
+            let context = ChannelExecutionContext(execution: .init(taskID: UUID(), platform: adapter.platform), command: .prepare, bridge: try bridge(), onEvent: { _ in })
+            do { _ = try await adapter.execute(request: request, context: context); Issue.record("Missing PNG preparation accepted") }
+            catch { #expect((error as? ChannelFailure)?.code == .invalidCommand) }
+        }
+    }
+
     @Test func finishedContextRejectsLateEventsAndCancellationPropagates() async throws {
         var events: [ChannelEvent] = []
         let context = ChannelExecutionContext(execution: .init(taskID: UUID(), platform: .x), command: .prepare, bridge: try bridge(), onEvent: { events.append($0) })
@@ -94,14 +149,19 @@ struct ChannelAdapterTests {
 
 private final class RecordingAdapter: ChannelAdapter {
     let platform: PlatformID
-    let capabilities = ChannelCapabilities(usesTitle: false, maximumImages: 1)
+    let capabilities: ChannelCapabilities
     var requests: [ChannelRequest] = []
     var commands: [ChannelCommand] = []
+    var uploads: [[String]] = []
     let fail: Bool
     let cancel: Bool
-    init(platform: PlatformID = .weibo, fail: Bool = false, cancel: Bool = false) { self.platform = platform; self.fail = fail; self.cancel = cancel }
+    init(platform: PlatformID = .weibo, fail: Bool = false, cancel: Bool = false, maximumImages: Int = 1) {
+        self.platform = platform; self.fail = fail; self.cancel = cancel
+        capabilities = ChannelCapabilities(usesTitle: false, maximumImages: maximumImages)
+    }
     @MainActor func execute(request: ChannelRequest, context: ChannelExecutionContext) async throws -> ChannelOutcome {
         requests.append(request); commands.append(context.command)
+        uploads.append(try context.uploadPaths(for: request))
         try context.advance(.fillingContent)
         if cancel { throw CancellationError() }
         if fail { throw EgoBridge.BridgeError.toolFailed("adapter failure") }
@@ -123,6 +183,7 @@ struct ClipboardContractTests {
         catch { #expect((error as? ChannelFailure)?.recovery == .retryAllowed) }
         try lease.writePNG(path: file.path)
         #expect(board.data(forType: .png) != nil)
+        #expect(board.data(forType: .png) == (try Data(contentsOf: file)))
         lease.restore(); lease.restore()
         #expect(board.string(forType: .string) == "original")
         let next = try ImageClipboardSession.acquire(clipboard: board)
@@ -141,6 +202,15 @@ struct ClipboardContractTests {
         let board = NSPasteboard(name: .init("inkpost-test-\(UUID().uuidString)"))
         let lease = try ImageClipboardSession.acquire(clipboard: board)
         lease.restore()
+    }
+
+    @Test func clipboardRejectsNonPNGWithoutConvertingOrChangingClipboard() throws {
+        let board = NSPasteboard(name: .init("inkpost-test-\(UUID().uuidString)"))
+        board.clearContents(); board.setString("user copy", forType: .string)
+        let lease = try ImageClipboardSession.acquire(clipboard: board)
+        defer { lease.restore() }
+        #expect(throws: (any Error).self) { try lease.writePNG(path: testAssetFile(type: .tiff).path) }
+        #expect(board.string(forType: .string) == "user copy")
     }
 }
 
@@ -302,7 +372,7 @@ struct DeterministicFixtureTests {
             try EgoBridge(spaceName: "fixture-stub", engine: EgoLiteEngine(binaryPath: binary.path))
         })
         let task = UUID(); try await service.beginTask(id: task)
-        let result = try await service.execute(request: .init(title: "Title", body: " Body\n\n tail ", html: "<p>unused</p>", tags: ["swift"], assets: ["image"]),
+        let result = try await service.execute(request: .init(title: "Title", body: " Body\n\n tail ", html: "<p>unused</p>", tags: ["swift"], assets: [try testAssetFile().path]),
             execution: .init(taskID: task, platform: .simFixture), command: .prepare, onEvent: { _ in })
         if defect == "valid" { #expect(result == .readyForReview(message: "模拟平台已填好")) }
         else if defect == "writeFailure" {

@@ -27,10 +27,8 @@ final class ImageClipboardSession {
     func writePNG(path: String) throws {
         try Task.checkCancellation()
         guard !released else { throw ChannelFailure(code: .invalidCommand, stage: .uploadingAssets, detail: "剪贴板会话已结束", recovery: .notRecoverable) }
-        guard let image = NSImage(contentsOfFile: path), let tiff = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiff), let png = bitmap.representation(using: .png, properties: [:]) else {
-            throw EgoBridge.BridgeError.toolFailed("无法读取待上传图片")
-        }
+        let png = try AssetService.validatedPNG(Data(contentsOf: URL(fileURLWithPath: path)))
+        try Task.checkCancellation()
         guard clipboard.changeCount == (ownedChange ?? initialChange) else {
             throw EgoBridge.BridgeError.toolFailed("剪贴板被修改，已停止图片粘贴，请重试")
         }

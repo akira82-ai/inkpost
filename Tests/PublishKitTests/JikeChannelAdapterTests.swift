@@ -87,8 +87,9 @@ struct JikeInputTests {
         try #require(bitmap.representation(using: .png, properties: [:])).write(to: second)
         let first = ProcessInfo.processInfo.environment["INKPOST_JIKE_ASSET"] ?? "/tmp/inkpost-jike-probe.png"
         let request = ChannelRequest(title: "此标题不应填入", body: "  即刻适配器验证\n\n保留空行与  空格。\n仅填写，不发送。  ", tags: ["验证"], assets: [first, second.path])
+        let prepared = try AssetService.preparePNGAssets(request.assets)
         for command in [ChannelCommand.prepare, .resumeAfterUser] {
-            let context = ChannelExecutionContext(execution: .init(taskID: UUID(), platform: .jike), command: command, bridge: bridge, onEvent: { _ in })
+            let context = ChannelExecutionContext(execution: .init(taskID: UUID(), platform: .jike), command: command, bridge: bridge, preparedAssets: prepared.assets, onEvent: { _ in })
             let result = try await adapter.execute(request: request, context: context)
             #expect(result.failure == nil)
         }
@@ -120,7 +121,8 @@ struct JikeImageTests {
         if 'jike:paste-body' in script:state['body']='Body'
         if 'jike:upload-image' in script:
             upload=pathlib.Path(json.loads(script.split('await chooser.setFiles(',1)[1].split(');',1)[0]))
-            assert upload == root/'source.tiff'
+            assert upload.suffix == '.png' and upload != root/'source.tiff'
+            assert upload.read_bytes().startswith(bytes([137,80,78,71,13,10,26,10]))
             with (root/'uploads').open('a') as f:f.write(str(upload)+'\\n')
             state['uploads']+=1
             if mode=='unknown':result={'ok':False,'error':'write result unknown'}
@@ -137,8 +139,9 @@ struct JikeImageTests {
         let bridge = try EgoBridge(spaceName: "image-stub", engine: EgoLiteEngine(binaryPath: binary.path))
         let adapter = JikeChannelAdapter()
         let request = ChannelRequest(title: "unused", body: "Body", html: "unused", assets: [original.path, original.path])
+        let prepared = try AssetService.preparePNGAssets(request.assets)
         func run(_ command: ChannelCommand) async throws -> ChannelOutcome {
-            try await adapter.execute(request: request, context: .init(execution: .init(taskID: UUID(), platform: .jike), command: command, bridge: bridge, onEvent: { _ in }))
+            try await adapter.execute(request: request, context: .init(execution: .init(taskID: UUID(), platform: .jike), command: command, bridge: bridge, preparedAssets: prepared.assets, onEvent: { _ in }))
         }
         if ["valid", "reordered"].contains(mode) {
             #expect(try await run(.prepare).failure == nil)
@@ -161,6 +164,6 @@ struct JikeImageTests {
         #expect(!log.contains("page.reload"))
         #expect(try Data(contentsOf: original) == sourceBytes)
         let uploads = try String(contentsOf: directory.appendingPathComponent("uploads")).split(separator: "\n")
-        #expect(uploads.allSatisfy { String($0) == original.path })
+        #expect(uploads.allSatisfy { String($0) == prepared.assets[0].pngPath })
     }
 }

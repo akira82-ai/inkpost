@@ -83,8 +83,9 @@ struct XChannelAdapterTests {
         }
         let bridge = try EgoBridge(spaceName: try #require(ProcessInfo.processInfo.environment["INKPOST_X_LIVE_SPACE"]), engine: EgoLiteEngine(), pageLabel: try #require(ProcessInfo.processInfo.environment["INKPOST_X_LIVE_PAGE"]))
         let request = ChannelRequest(title: "墨驿 X 适配器验证", body: "  保留空格\n\n仅填写，不发布。", tags: ["测试"], assets: paths)
+        let prepared = try AssetService.preparePNGAssets(request.assets)
         for command in [ChannelCommand.prepare, .resumeAfterUser] {
-            let context = ChannelExecutionContext(execution: .init(taskID: UUID(), platform: .x), command: command, bridge: bridge,
+            let context = ChannelExecutionContext(execution: .init(taskID: UUID(), platform: .x), command: command, bridge: bridge, preparedAssets: prepared.assets,
                 onEvent: { _ in })
             let outcome = try await adapter.execute(request: request, context: context)
             #expect(outcome.failure == nil)

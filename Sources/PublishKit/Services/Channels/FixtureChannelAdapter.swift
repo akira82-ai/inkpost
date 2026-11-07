@@ -10,6 +10,7 @@ final class FixtureChannelAdapter: ChannelAdapter {
     @MainActor
     func execute(request: ChannelRequest, context: ChannelExecutionContext) async throws -> ChannelOutcome {
         try PlatformRules.validate(request, capabilities: capabilities)
+        let uploadPaths = try context.uploadPaths(for: request)
         let bridge = context.bridge
         try context.advance(.openingEditor)
         if !opened {
@@ -30,7 +31,7 @@ final class FixtureChannelAdapter: ChannelAdapter {
             try context.advance(.uploadingAssets)
             if !uploadStarted {
                 uploadStarted = true
-                _ = try await bridge.upload(target: "#files", paths: request.assets)
+                _ = try await bridge.upload(target: "#files", paths: uploadPaths)
             }
         }
         try context.advance(.verifyingContent)

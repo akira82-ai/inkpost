@@ -1,0 +1,26 @@
+# Jike adapter maintenance
+
+## Scope and input
+
+- Deterministic inline thoughts composer at `https://web.okjike.com/following`. No model service. Receive the complete ChannelRequest; use raw body and appended tags, leave title and HTML unused (no independent title field). Do not invent a title or merge it into body.
+- Body required; images optional. No verified platform length/image ceiling is asserted; product editor currently selects at most six assets. Pass every selected image and check actual acceptance; never truncate or drop attachments.
+- Circle selection is left to the user; do not choose suggested circles automatically. This adapter does not implement circle search, video or link-card creation.
+- Upload the supplied asset files unchanged. Do not detect, convert or repair image formats in this adapter; format preparation belongs upstream. If the page cannot accept or verify an attachment, report failure and preserve the page instead of transforming or retrying it.
+
+
+## Verified interactions
+
+- 2026-11-07: the visible 分享你的想法... placeholder is an overlay. Clicking that text times out because the editable paragraph intercepts input. Target its owning `form [data-lexical-editor="true"][contenteditable="true"]` instead; fail on missing/ambiguous structure.
+- Click the editor and use native keyboard.paste for complete plain text. Lexical uses paragraphs containing text spans and BR nodes; read logical paragraph children with BR as a line break, empty placeholder paragraph as empty, preserving spaces and empty lines. Do not use textContent alone or trim user content.
+- Native image chooser verified via `form [title="图片"]`, waitForFileChooser then setFiles with an explicit path. Use this tested route, not clipboard image paste, which was blocked during development due to clipboard races. Upload one at a time and verify before continuing.
+- Count only sortable attachment cards inside the composer form. Blob preview URLs can change during upload: confirm identity only after loading markers disappear, image decodes, and Send becomes enabled. Adding another image recreates existing blob URLs: hash decoded preview pixels with SHA-256 instead of comparing or fetching blob URLs (revoked URLs race with upload). Read pixels with a detached OffscreenCanvas; include dimensions in the digest. After confirmation compare ordered tile ID + preview pixel digest to detect replacement/reordering.
+- Mark upload pending before dispatch. Unknown results or changed attachments require inspection; never blindly upload again. Resume reuses the same adapter/Page and checks existing text/images before writes. Do not reload an existing editor or close it. No durable draft claim.
+- Stop before `button[type="submit"]` (发送). Enabled status is a readiness signal only. No publication or receipt tracking.
+
+## Acceptance and limitations
+
+- Offline tests exercise real adapter text handling, login/user-action recovery, conflict, rejection, cancellation and deduplication. Common service contract tests cover full request delivery, unchanged-snapshot resume, duplicate prepare and stale events/results.
+- Live acceptance is opt-in via INKPOST_JIKE_LIVE, INKPOST_JIKE_SPACE and INKPOST_JIKE_PAGE. Use an agent-owned fresh Page, a generated `/tmp/inkpost-jike-probe.png` and a second generated image, and leave the filled page for review; never send.
+- Actual logged-out UI, login expiry during upload, interrupted network, six-image upload, and user attachment replacement remain live fault-injection work. Login detection uses observed editor availability plus explicit login routes/buttons; unexpected pages must fail visibly rather than being assumed logged out.
+- Manual image paste and native PNG chooser upload were verified. Direct TIFF upload enabled Send but produced an undecodable preview; this remains a failure, not a reason for adapter-side conversion. Earlier TIFF-to-PNG live success tested a conversion that has since been removed and does not establish raw TIFF support.
+- INKPOST_JIKE_ASSET overrides the first live asset. Offline tests assert the original path and bytes are preserved, with no duplicate uploads on recovery.

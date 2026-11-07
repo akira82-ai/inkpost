@@ -45,6 +45,6 @@ public struct ChannelRegistry {
     }
     public func adapter(for platform: PlatformID) -> (any ChannelAdapter)? { adapters[platform] }
     public static var standard: ChannelRegistry {
-        .init([ZhihuChannelAdapter(), XChannelAdapter(), FixtureChannelAdapter()])
+        .init([ZhihuChannelAdapter(), JikeChannelAdapter(), XChannelAdapter(), FixtureChannelAdapter()])
     }
 }

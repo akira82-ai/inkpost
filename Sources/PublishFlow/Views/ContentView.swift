@@ -212,7 +212,7 @@ struct ContentView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 Text("渠道与账号，集中管理。").font(.custom("Songti SC", size: 26))
-                Text("已接入知乎和 X。账号登录状态将在填写时检查；其余平台为待适配渠道。")
+                Text("已接入知乎、即刻和 X。账号登录状态将在填写时检查；其余平台为待适配渠道。")
                     .font(InkStyle.font(12)).foregroundStyle(InkStyle.muted)
                 channelCards
             }.padding(32)

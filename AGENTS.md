@@ -81,4 +81,4 @@
 ## Deterministic channel execution
 
 - LLM clients, tool-use loops and model configuration have been removed. Dispatch contracts carry content and execution identity only.
-- Zhihu, X and the local fixture use deterministic workflows. Jike is unavailable until its deterministic adapter is implemented; retain its platform identity and View metadata for that work.
+- Zhihu, Jike, X and the local fixture use deterministic workflows. Read `Sources/PublishKit/Services/Channels/JikeChannelAdapter.md` before changing Jike; keep its inline composer, exact text verification and ordered attachment recovery within its adapter.

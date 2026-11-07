@@ -21,11 +21,10 @@ struct DispatchControllerTests {
         #expect(controller.state.overallPhase != .preparing, "Dispatch timed out")
     }
 
-    @Test func testSerialDispatchUsesPlatformRulesAndMapsResults() async throws {
+    @Test func testSerialDispatchPreservesRequestAndMapsResults() async throws {
         let service = FakeDispatchService()
         service.statuses = [.zhihu: "draftReady", .jike: "needLogin", .x: "failed"]
         let controller = makeController(service)
-        controller.state.tagsText = "#swift #macOS"
         controller.dispatch()
         #expect(!controller.canDispatch)
         try await waitForDispatch(controller)
@@ -34,7 +33,6 @@ struct DispatchControllerTests {
         #expect(controller.state.platformPhase[.jike] == .needLogin)
         #expect(controller.state.platformPhase[.x] == .failed)
         #expect(service.requests[0].body == "Test **body**")
-        #expect(service.requests[0].tags == "#swift #macOS")
         #expect(service.requests[1] == service.requests[0])
         #expect(service.requests[2] == service.requests[0])
     }
@@ -48,10 +46,8 @@ struct DispatchControllerTests {
         #expect(controller.state.overallPhase == .failed)
         let original = service.requests.last
         let originalBody = service.bodies.last
-        let originalTags = service.tagSnapshots.last
         let originalAssets = service.assetSnapshots.last
         controller.state.markdown = "Changed during pause"
-        controller.state.tagsText = "#changed"
         controller.state.assetPaths = ["/tmp/changed.png"]
         service.statuses[.x] = "draftReady"
         controller.resume(.x)
@@ -59,9 +55,32 @@ struct DispatchControllerTests {
         #expect(service.platforms == [.zhihu, .jike, .x, .x])
         #expect(service.requests.last == original)
         #expect(service.bodies.last == originalBody)
-        #expect(service.tagSnapshots.last == originalTags)
         #expect(service.assetSnapshots.last == originalAssets)
         #expect(controller.state.overallPhase == .awaitingConfirm)
+    }
+
+    @Test func productInputMatrixDoesNotApplyChannelTitlePolicy() async throws {
+        for title in ["", "标题"] {
+            for assets in [[], ["/tmp/optional.png"]] {
+                let service = FakeDispatchService()
+                let controller = makeController(service)
+                controller.state.selectedPlatforms = [.simFixture, .jike]
+                controller.state.title = title
+                controller.state.assetPaths = assets
+                #expect(controller.canDispatch)
+                controller.dispatch()
+                try await waitForDispatch(controller)
+                #expect(service.requests.count == 2)
+                #expect(service.requests.allSatisfy { $0.title == title && $0.assets == assets })
+            }
+        }
+        let controller = makeController(FakeDispatchService())
+        controller.state.selectedPlatforms = []
+        #expect(!controller.canDispatch)
+        controller.state.selectedPlatforms = [.jike]
+        controller.state.markdown = ""
+        controller.state.assetPaths = ["/tmp/image.png"]
+        #expect(!controller.canDispatch)
     }
 
     @Test func testZhihuOptionalTitleCanDispatch() {
@@ -97,7 +116,7 @@ struct DispatchControllerTests {
     @Test func testDispatchPreservesBodyWhitespaceAndMarkdown() async throws {
         let service = FakeDispatchService()
         let controller = makeController(service)
-        let original = "  **正文**\n\n  尾部  \n"
+        let original = "  **正文**\n\n  尾部  \n  #AI\t##工具\n #中文  "
         controller.state.markdown = original
         controller.dispatch()
         try await waitForDispatch(controller)
@@ -111,18 +130,15 @@ struct DispatchControllerTests {
         service.statuses[.x] = "needLogin"
         let controller = makeController(service)
         let title = "  标题 🖋️  "
-        let body = "  **正文**\n\n\n  ```swift\n  let x = 1\n  ```\n尾部  \n"
-        let tags = "  #AI\t##工具\n #中文  "
+        let body = "  **正文**\n\n\n  ```swift\n  let x = 1\n  ```\n尾部  \n  #AI\t##工具\n #中文  "
         let paths = ["/tmp/second.png", "/tmp/first.png"]
         controller.state.title = title
         controller.state.markdown = body
-        controller.state.tagsText = tags
         controller.state.assetPaths = paths
         controller.dispatch()
         try await waitForDispatch(controller)
         controller.state.title = "changed"
         controller.state.markdown = "changed"
-        controller.state.tagsText = "changed"
         controller.state.assetPaths = []
         service.statuses[.x] = "draftReady"
         controller.resume(.x)
@@ -131,7 +147,6 @@ struct DispatchControllerTests {
         for request in service.requests {
             #expect(request.title == title)
             #expect(request.body == body)
-            #expect(request.tags == tags)
             #expect(request.html.isEmpty)
             #expect(request.assets == paths)
         }
@@ -141,12 +156,11 @@ struct DispatchControllerTests {
         let service = FakeDispatchService()
         let controller = makeController(service)
         controller.state.title = ""
-        controller.state.tagsText = ""
         controller.state.assetPaths = []
         controller.dispatch()
         try await waitForDispatch(controller)
         #expect(service.requests.count == 3)
-        #expect(service.requests.allSatisfy { $0.title.isEmpty && $0.tags.isEmpty && $0.html.isEmpty && $0.assets.isEmpty })
+        #expect(service.requests.allSatisfy { $0.title.isEmpty && $0.html.isEmpty && $0.assets.isEmpty })
     }
 
     @Test func testWhitespaceOnlyBodyIsRejectedWithoutMutation() {
@@ -345,7 +359,6 @@ private final class FakeDispatchService: DispatchServicing {
     var executions: [ChannelExecutionID] = []
     var requests: [ChannelRequest] = []
     var bodies: [String] = []
-    var tagSnapshots: [String] = []
     var assetSnapshots: [[String]] = []
     func beginTask(id: UUID) async throws {}
     func resumeControl() async throws {}
@@ -356,7 +369,7 @@ private final class FakeDispatchService: DispatchServicing {
         platforms.append(platform); requests.append(request)
         callbacks.append(onEvent); executions.append(execution)
         if pause { try await Task.sleep(for: .seconds(10)) }
-        bodies.append(request.body); tagSnapshots.append(request.tags); assetSnapshots.append(request.assets)
+        bodies.append(request.body); assetSnapshots.append(request.assets)
         if platform == throwPlatform { throw NSError(domain: "test", code: 1) }
         if platform == verificationFailure {
             return .failed(.init(code: .verificationFailed, stage: .verifyingContent, detail: "verification failed", recovery: .inspectionRequired))

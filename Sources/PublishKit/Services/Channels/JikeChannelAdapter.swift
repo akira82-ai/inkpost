@@ -11,7 +11,7 @@ final class JikeChannelAdapter: ChannelAdapter {
     private var pending = false
     private var opened = false
 
-    func expectedBody(for request: ChannelRequest) -> String { request.taggedBody }
+    func expectedBody(for request: ChannelRequest) -> String { request.body }
     func validate(_ request: ChannelRequest) throws {
         guard !request.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ChannelFailure(code: .contentUnsupported, stage: .validatingRequest,
@@ -117,7 +117,7 @@ final class JikeChannelAdapter: ChannelAdapter {
             throw ChannelFailure(code: .contentUnsupported, stage: .verifyingContent,
                 detail: "即刻尚未允许发送，请检查字数、附件或页面提示", recovery: .contentChangeRequired)
         }
-        return .readyForReview(message: "即刻正文、标签及 \(request.assets.count) 张图片已核对，请检查后亲手发送")
+        return .readyForReview(message: "即刻正文及 \(request.assets.count) 张图片已核对，请检查后亲手发送")
     }
 
     struct Image: Decodable { let identity: String; let ready: Bool }
@@ -138,7 +138,7 @@ final class JikeChannelAdapter: ChannelAdapter {
         }
         func lines(_ text: String) -> String { text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n") }
         guard lines(state.body) == lines(expectedBody(for: request)) || (allowEmpty && state.body.isEmpty) else {
-            throw failure("即刻正文、空格、段落或标签与任务不一致，已保留原内容")
+            throw failure("即刻正文、空格或段落与任务不一致，已保留原内容")
         }
     }
     private func failure(_ detail: String, stage: ChannelStage = .verifyingContent) -> ChannelFailure {

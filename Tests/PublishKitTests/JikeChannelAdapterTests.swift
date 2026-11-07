@@ -11,7 +11,7 @@ struct JikeChannelAdapterTests {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let binary = dir.appendingPathComponent("jike-stub")
         let log = dir.appendingPathComponent("log")
-        let request = ChannelRequest(title: "标题", body: " 正文\n\n尾 ", tags: "x")
+        let request = ChannelRequest(title: "标题", body: " 正文\n\n尾 ")
         let expected = JikeChannelAdapter().expectedBody(for: request)
         let source = """
         #!/usr/bin/python3
@@ -65,8 +65,8 @@ struct JikeChannelAdapterTests {
 struct JikeInputTests {
     @Test func completeRequestAndValidation() throws {
         let adapter = JikeChannelAdapter()
-        let request = ChannelRequest(title: "保留但不使用标题", body: " 正文\n\n 尾 ", html: "<p>unused</p>", tags: "测试", assets: ["a","b"])
-        #expect(adapter.expectedBody(for: request) == " 正文\n\n 尾 \n\n#测试")
+        let request = ChannelRequest(title: "保留但不使用标题", body: " 正文\n\n 尾 \n  #AI\t##工具  ", html: "<p>unused</p>", assets: ["a","b"])
+        #expect(adapter.expectedBody(for: request) == request.body)
         try adapter.validate(request)
         #expect(throws: ChannelFailure.self) { try adapter.validate(.init(title: "标题", body: " \n")) }
         #expect(ChannelRegistry.standard.adapter(for: .jike) != nil)
@@ -86,7 +86,7 @@ struct JikeInputTests {
         for y in 0..<80 { for x in 0..<80 { bitmap.setColor(NSColor(deviceRed: 0.9, green: 0.5, blue: 0.2, alpha: 1), atX: x, y: y) } }
         try #require(bitmap.representation(using: .png, properties: [:])).write(to: second)
         let first = ProcessInfo.processInfo.environment["INKPOST_JIKE_ASSET"] ?? "/tmp/inkpost-jike-probe.png"
-        let request = ChannelRequest(title: "此标题不应填入", body: "  即刻适配器验证\n\n保留空行与  空格。\n仅填写，不发送。  ", tags: "验证", assets: [first, second.path])
+        let request = ChannelRequest(title: "此标题不应填入", body: "  即刻适配器验证\n\n保留空行与  空格。\n仅填写，不发送。  ", assets: [first, second.path])
         let prepared = try AssetService.preparePNGAssets(request.assets)
         for command in [ChannelCommand.prepare, .resumeAfterUser] {
             let context = ChannelExecutionContext(execution: .init(taskID: UUID(), platform: .jike), command: command, bridge: bridge, preparedAssets: prepared.assets, onEvent: { _ in })

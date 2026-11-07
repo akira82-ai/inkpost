@@ -3,13 +3,29 @@ import Foundation
 /// Deterministic local fixture workflow; never clicks the publication control.
 final class FixtureChannelAdapter: ChannelAdapter {
     let platform: PlatformID = .simFixture
-    let capabilities = ChannelCapabilities(usesTitle: true, maximumImages: 6, isArticle: true)
+    let capabilities = ChannelCapabilities(usesTitle: true, maximumImages: 6, isArticle: true, requiresTitle: true)
     private var opened = false
     private var uploadStarted = false
 
+    func validate(_ request: ChannelRequest) throws {
+        if capabilities.requiresTitle && request.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw ChannelFailure(code: .contentUnsupported, stage: .validatingRequest,
+                                 detail: "请填写标题", recovery: .contentChangeRequired)
+        }
+        if request.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw ChannelFailure(code: .contentUnsupported, stage: .validatingRequest,
+                                 detail: "请填写正文", recovery: .contentChangeRequired)
+        }
+        if request.assets.count > capabilities.maximumImages {
+            throw ChannelFailure(code: .contentUnsupported, stage: .validatingRequest,
+                                 detail: "图片超过渠道上限（最多 \(capabilities.maximumImages) 张）", recovery: .contentChangeRequired)
+        }
+    }
+
     @MainActor
     func execute(request: ChannelRequest, context: ChannelExecutionContext) async throws -> ChannelOutcome {
-        try PlatformRules.validate(request, capabilities: capabilities)
+        try context.advance(.validatingRequest)
+        try validate(request)
         let uploadPaths = try context.uploadPaths(for: request)
         let bridge = context.bridge
         try context.advance(.openingEditor)
@@ -19,7 +35,7 @@ final class FixtureChannelAdapter: ChannelAdapter {
         }
         try context.advance(.fillingContent)
         // Preserve an existing matching field; conflicts require inspection, never overwrite.
-        for (target, expected) in [("#title", request.title), ("#editor", request.body), ("#tags", request.tagText)] {
+        for (target, expected) in [("#title", request.title), ("#editor", request.body)] {
             let current = try await DraftVerifier.read(bridge: bridge, target: target)["text"] as? String ?? ""
             guard current.isEmpty || current == expected else {
                 throw ChannelFailure(code: .verificationFailed, stage: .fillingContent,

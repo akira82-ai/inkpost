@@ -99,8 +99,7 @@ public final class DispatchService: DispatchServicing {
         onEvent(.init(execution: execution, payload: .stage(.validatingRequest)))
         let context: ChannelExecutionContext
         do {
-            let adapter = try requiredAdapter(platform)
-            try PlatformRules.validate(request, capabilities: adapter.capabilities)
+            _ = try requiredAdapter(platform)
             if assetPreparation == nil {
                 taskRequest = request
                 onEvent(.init(execution: execution, payload: .diagnostic("统一准备 \(request.assets.count) 张 PNG 上传素材")))

@@ -34,13 +34,12 @@ public enum PlatformID: String, Codable, CaseIterable, Identifiable, Sendable {
 // MARK: - 内容与任务协议（Swift ↔ 适配器脚本 共享的 JSON 契约）
 
 public struct Article: Codable {
-    public init(title: String, markdown: String, html: String, tags: [String]) {
-        self.title = title; self.markdown = markdown; self.html = html; self.tags = tags
+    public init(title: String, markdown: String, html: String) {
+        self.title = title; self.markdown = markdown; self.html = html
     }
     public var title: String
     public var markdown: String
     public var html: String
-    public var tags: [String]
 }
 
 public struct TaskAsset: Codable {
@@ -113,7 +112,6 @@ public struct Post: Codable, Identifiable {
     public var id: String = UUID().uuidString
     public var title: String = ""
     public var markdown: String = ""
-    public var tags: [String] = []
     /// 图片等素材的绝对路径
     public var assetPaths: [String] = []
     public var targetStates: [TargetState] = []

@@ -8,10 +8,29 @@ final class ZhihuChannelAdapter: ChannelAdapter {
     private static let bodyTarget = "[contenteditable=\"true\"]"
     private var images = ImageProgress()
 
+    func validate(_ request: ChannelRequest) throws {
+        if request.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw ChannelFailure(code: .contentUnsupported, stage: .validatingRequest,
+                                 detail: "请填写正文", recovery: .contentChangeRequired)
+        }
+        if let limit = capabilities.maximumTitleCharacters, request.title.count > limit {
+            throw ChannelFailure(code: .contentUnsupported, stage: .validatingRequest,
+                                 detail: "标题最多 \(limit) 字，当前 \(request.title.count) 字", recovery: .contentChangeRequired)
+        }
+        if let limit = capabilities.maximumBodyCharacters, request.body.count > limit {
+            throw ChannelFailure(code: .contentUnsupported, stage: .validatingRequest,
+                                 detail: "正文（含换行）最多 \(limit) 字，当前 \(request.body.count) 字", recovery: .contentChangeRequired)
+        }
+        if request.assets.count > capabilities.maximumImages {
+            throw ChannelFailure(code: .contentUnsupported, stage: .validatingRequest,
+                                 detail: "图片超过渠道上限（最多 \(capabilities.maximumImages) 张）", recovery: .contentChangeRequired)
+        }
+    }
+
     @MainActor
     func execute(request: ChannelRequest, context: ChannelExecutionContext) async throws -> ChannelOutcome {
         try context.advance(.validatingRequest)
-        try PlatformRules.validate(request, capabilities: capabilities)
+        try validate(request)
         let uploadPaths = try context.uploadPaths(for: request)
         try context.advance(.openingEditor)
         context.diagnostic("打开知乎首页，定位「分享此刻的想法」")
@@ -31,10 +50,10 @@ final class ZhihuChannelAdapter: ChannelAdapter {
         try images.validate(initial.images)
         try context.advance(.fillingContent)
         try await fillTitle(request.title, existing: initial.title, bridge: context.bridge)
-        try await fillBody(request.taggedBody, existing: initial.body, bridge: context.bridge)
+        try await fillBody(request.body, existing: initial.body, bridge: context.bridge)
         let filled = try await readPage(context.bridge)
         try filled.checkContent(request, allowEmpty: false)
-        context.diagnostic("标题、完整正文与标签已回读核对")
+        context.diagnostic("标题、完整正文已回读核对")
 
         try context.advance(.uploadingAssets)
         try await uploadImages(uploadPaths, context: context)
@@ -45,7 +64,7 @@ final class ZhihuChannelAdapter: ChannelAdapter {
         guard final.images.count == request.assets.count, final.images.allSatisfy(\.ready), images.pending == nil else {
             throw failure(.verificationFailed, .verifyingContent, "图片数量或上传状态不完整")
         }
-        return .readyForReview(message: "标题、正文、标签及 \(request.assets.count) 张图片已核对，请检查后亲手发想法")
+        return .readyForReview(message: "标题、正文及 \(request.assets.count) 张图片已核对，请检查后亲手发想法")
     }
 
     private func fillTitle(_ title: String, existing: String, bridge: EgoBridge) async throws {
@@ -58,7 +77,7 @@ final class ZhihuChannelAdapter: ChannelAdapter {
         _ = try await ClipboardPasteService.withTextPaste {
             try await bridge.run("""
                 // zhihu:paste-body
-                await page.click(\(bridge.jsStr(Self.bodyTarget)), {label:'粘贴完整正文和标签'});
+                await page.click(\(bridge.jsStr(Self.bodyTarget)), {label:'粘贴完整正文'});
                 await page.keyboard.paste(\(bridge.jsStr(body)));
                 cliLog(JSON.stringify({ok:true}));
                 """)
@@ -143,9 +162,9 @@ final class ZhihuChannelAdapter: ChannelAdapter {
             }
             // CRLF is one line break. Preserve spaces and every empty paragraph.
             func lines(_ text: String) -> String { text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n") }
-            guard lines(body) == lines(request.taggedBody) || (allowEmpty && body.isEmpty) else {
+            guard lines(body) == lines(request.body) || (allowEmpty && body.isEmpty) else {
                 throw ChannelFailure(code: .verificationFailed, stage: allowEmpty ? .fillingContent : .verifyingContent,
-                    detail: "知乎正文、段落或标签与提交内容不一致，已保留页面内容", recovery: .inspectionRequired)
+                    detail: "知乎正文或段落与提交内容不一致，已保留页面内容", recovery: .inspectionRequired)
             }
         }
     }

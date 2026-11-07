@@ -15,7 +15,7 @@ struct ChannelAdapterTests {
         let service = DispatchService(registryFactory: { .init([adapter]) }, bridgeFactory: { _ in pages += 1; return try bridge() })
         let task = UUID()
         try await service.beginTask(id: task)
-        let request = ChannelRequest(title: "Title", body: "Complete\nbody", html: "  <p>Complete</p>\n", tags: "  #swift\t##中文  ", assets: [try testAssetFile(type: .tiff).path])
+        let request = ChannelRequest(title: "Title", body: "Complete\nbody", html: "  <p>Complete</p>\n", assets: [try testAssetFile(type: .tiff).path])
         let first = try await service.execute(request: request, execution: .init(taskID: task, platform: .weibo), command: .prepare, onEvent: { _ in })
         #expect(first.failure?.code == .loginRequired)
         let invalid = try await service.execute(request: .init(title: "", body: "changed"), execution: .init(taskID: task, platform: .weibo), command: .resumeAfterUser, onEvent: { _ in })
@@ -47,9 +47,29 @@ struct ChannelAdapterTests {
         let invalid = try await service.execute(request: .init(title: "", body: ""), execution: .init(taskID: task, platform: .weibo), command: .resumeAfterUser, onEvent: { _ in })
         #expect(invalid.failure?.code == .invalidCommand)
         try await service.beginTask(id: task)
-        let tooMany = try await service.execute(request: .init(title: "", body: "Body", assets: ["a", "b"]), execution: .init(taskID: task, platform: .weibo), command: .prepare, onEvent: { _ in })
+        let tooMany = try await service.execute(request: .init(title: "", body: "Body", assets: [try testAssetFile().path, try testAssetFile().path]), execution: .init(taskID: task, platform: .weibo), command: .prepare, onEvent: { _ in })
         #expect(tooMany.failure?.code == .contentUnsupported)
-        #expect(pages == 2)
+        #expect(pages == 3)
+    }
+
+    @Test func channelPoliciesFailLocallyAndRawRequestStillReachesNextAdapter() async throws {
+        let assets = try (0..<5).map { _ in try testAssetFile().path }
+        for request in [ChannelRequest(title: "", body: "  #AI\t##工具\n\n尾  ", html: " <b>raw</b> "),
+                        ChannelRequest(title: String(repeating: "中", count: 45), body: "正文"),
+                        ChannelRequest(title: "", body: String(repeating: "文", count: 1900)),
+                        ChannelRequest(title: "", body: "正文", assets: assets)] {
+            let accepted = RecordingAdapter(platform: .weibo, maximumImages: 6)
+            let service = DispatchService(registryFactory: { .init([FixtureChannelAdapter(), ZhihuChannelAdapter(), XChannelAdapter(), accepted]) }, bridgeFactory: { _ in try bridge() })
+            let task = UUID(); try await service.beginTask(id: task)
+            let rejected: PlatformID = request.assets.isEmpty ? (request.title.isEmpty && request.body.count < 100 ? .simFixture : .zhihu) : .x
+            let outcome = try await service.execute(request: request, execution: .init(taskID: task, platform: rejected), command: .prepare, onEvent: { _ in })
+            #expect(outcome.failure?.code == .contentUnsupported)
+            #expect(outcome.failure?.recovery == .contentChangeRequired)
+            _ = try await service.execute(request: request, execution: .init(taskID: task, platform: .weibo), command: .prepare, onEvent: { _ in })
+            #expect(accepted.requests == [request])
+            #expect(accepted.uploads.first?.count == request.assets.count)
+        }
+        #expect(!ChannelCapabilities(usesTitle: true, maximumImages: 6).requiresTitle)
     }
 
     @Test func newTaskCreatesFreshAdapterSession() async throws {
@@ -71,7 +91,7 @@ struct ChannelAdapterTests {
         let source = try testAssetFile(type: .tiff)
         let original = try Data(contentsOf: source)
         let otherSource = try testAssetFile(type: .jpeg)
-        let request = ChannelRequest(title: " title ", body: " body\n\n ", html: "<p>unused</p>", tags: "tag", assets: [source.path, otherSource.path])
+        let request = ChannelRequest(title: " title ", body: " body\n\n ", html: "<p>unused</p>", assets: [source.path, otherSource.path])
         let task = UUID(); try await service.beginTask(id: task)
         _ = try await service.execute(request: request, execution: .init(taskID: task, platform: .weibo), command: .prepare, onEvent: { _ in })
         let paths = try #require(first.uploads.first)
@@ -161,6 +181,9 @@ private final class RecordingAdapter: ChannelAdapter {
     }
     @MainActor func execute(request: ChannelRequest, context: ChannelExecutionContext) async throws -> ChannelOutcome {
         requests.append(request); commands.append(context.command)
+        guard request.assets.count <= capabilities.maximumImages else {
+            throw ChannelFailure(code: .contentUnsupported, stage: .validatingRequest, detail: "Too many images", recovery: .contentChangeRequired)
+        }
         uploads.append(try context.uploadPaths(for: request))
         try context.advance(.fillingContent)
         if cancel { throw CancellationError() }
@@ -217,9 +240,9 @@ struct ClipboardContractTests {
 @MainActor
 struct ZhihuAdapterTests {
 
-    private let request = ChannelRequest(title: "知乎「标题」& 🖋️", body: "第一段  空格\n\n第二段", tags: "测试")
+    private let request = ChannelRequest(title: "知乎「标题」& 🖋️", body: "第一段  空格\n\n第二段")
 
-    @Test func oversizedTitleIsRejectedBeforeAllocatingPage() async throws {
+    @Test func oversizedTitleIsRejectedBeforeBrowserWrites() async throws {
         var pages = 0
         let service = DispatchService(registryFactory: { .init([ZhihuChannelAdapter()]) }, bridgeFactory: { _ in
             pages += 1
@@ -229,7 +252,7 @@ struct ZhihuAdapterTests {
         let result = try await service.execute(request: .init(title: String(repeating: "中", count: 45), body: "正文"), execution: .init(taskID: task, platform: .zhihu), command: .prepare, onEvent: { _ in })
         #expect(result.failure?.code == .contentUnsupported)
         #expect(result.failure?.recovery == .contentChangeRequired)
-        #expect(pages == 0)
+        #expect(pages == 1)
     }
 
     @Test(arguments: ["valid", "titleRejected", "bodyConflict", "login"])
@@ -257,25 +280,25 @@ struct ZhihuAdapterTests {
     }
 
     @Test func zhihuCharacterBoundariesAndOptionalFields() throws {
-        let capabilities = ZhihuChannelAdapter().capabilities
-        try PlatformRules.validate(.init(title: "", body: "正文"), capabilities: capabilities)
-        try PlatformRules.validate(.init(title: String(repeating: "中", count: 44), body: String(repeating: "文", count: 1899)), capabilities: capabilities)
-        try PlatformRules.validate(.init(title: String(repeating: "🖋️", count: 44), body: "正文"), capabilities: capabilities)
+        let adapter = ZhihuChannelAdapter()
+        try adapter.validate(.init(title: "", body: "正文"))
+        try adapter.validate(.init(title: String(repeating: "中", count: 44), body: String(repeating: "文", count: 1899)))
+        try adapter.validate(.init(title: String(repeating: "🖋️", count: 44), body: "正文"))
         for request in [ChannelRequest(title: String(repeating: "中", count: 45), body: "正文"),
                         .init(title: "", body: String(repeating: "文", count: 1900)),
-                        .init(title: "", body: String(repeating: "文", count: 1898), tags: "标签"),
+                        .init(title: "", body: String(repeating: "文", count: 1897) + "#AI"),
                         .init(title: "标题", body: " \n")] {
-            #expect(throws: ChannelFailure.self) { try PlatformRules.validate(request, capabilities: capabilities) }
+            #expect(throws: ChannelFailure.self) { try adapter.validate(request) }
         }
     }
 
     @Test func logicalParagraphVerificationPreservesWhitespaceAndLimits() throws {
-        let valid = ZhihuChannelAdapter.PageState(title: request.title, body: request.taggedBody.replacingOccurrences(of: "\n", with: "\r\n"), titleLimit: nil, titleValid: true, images: [])
+        let valid = ZhihuChannelAdapter.PageState(title: request.title, body: request.body.replacingOccurrences(of: "\n", with: "\r\n"), titleLimit: nil, titleValid: true, images: [])
         try valid.checkContent(request, allowEmpty: false)
         let empty = ZhihuChannelAdapter.PageState(title: "", body: "", titleLimit: nil, titleValid: true, images: [])
         try empty.checkContent(request, allowEmpty: true)
         #expect(throws: ChannelFailure.self) { try empty.checkContent(request, allowEmpty: false) }
-        for body in [request.taggedBody.replacingOccurrences(of: "\n\n", with: "\n"), request.taggedBody.replacingOccurrences(of: "  ", with: " "), "正文截断"] {
+        for body in [request.body.replacingOccurrences(of: "\n\n", with: "\n"), request.body.replacingOccurrences(of: "  ", with: " "), "正文截断"] {
             let page = ZhihuChannelAdapter.PageState(title: request.title, body: body, titleLimit: nil, titleValid: true, images: [])
             #expect(throws: ChannelFailure.self) { try page.checkContent(request, allowEmpty: false) }
         }
@@ -305,7 +328,7 @@ struct ZhihuAdapterTests {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let executable = directory.appendingPathComponent("ego-zhihu-stub")
         let log = directory.appendingPathComponent("scripts.log")
-        let values: [String: Any] = ["title": request.title, "body": request.taggedBody]
+        let values: [String: Any] = ["title": request.title, "body": request.body]
         let json = String(decoding: try JSONSerialization.data(withJSONObject: values), as: UTF8.self)
         let source = """
         #!/usr/bin/python3
@@ -337,7 +360,7 @@ struct ZhihuAdapterTests {
 
 @MainActor
 struct DeterministicFixtureTests {
-    @Test(arguments: ["valid", "body", "title", "tags", "images", "writeFailure"])
+    @Test(arguments: ["valid", "body", "title", "images", "writeFailure"])
     func verifiesRealAdapterAndStopsUnknownWrites(_ defect: String) async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -349,7 +372,7 @@ struct DeterministicFixtureTests {
         script=sys.stdin.read()
         with (root/'log').open('a') as log: log.write(script+'\n')
         path=root/'state'
-        state=json.loads(path.read_text()) if path.exists() else {'#title':'','#editor':'','#tags':'','#files':0}
+        state=json.loads(path.read_text()) if path.exists() else {'#title':'','#editor':'','#files':0}
         defect=DEFECT
         result={'ok':True}
         match=re.search(r'await page.fill\(("(?:\\.|[^"\\])*"), ("(?:\\.|[^"\\])*")\)',script)
@@ -361,7 +384,7 @@ struct DeterministicFixtureTests {
         if 'const el = document.querySelector' in script:
             key=next(k for k in state if k in script)
             value=state[key]
-            if value and defect=={'#title':'title','#editor':'body','#tags':'tags'}.get(key):value='truncated'
+            if value and defect=={'#title':'title','#editor':'body'}.get(key):value='truncated'
             result['value']={'files':value} if key=='#files' else {'text':value}
         path.write_text(json.dumps(state))
         print(json.dumps(result))
@@ -372,14 +395,13 @@ struct DeterministicFixtureTests {
             try EgoBridge(spaceName: "fixture-stub", engine: EgoLiteEngine(binaryPath: binary.path))
         })
         let task = UUID(); try await service.beginTask(id: task)
-        let result = try await service.execute(request: .init(title: "Title", body: " Body\n\n tail ", html: "<p>unused</p>", tags: "swift", assets: [try testAssetFile().path]),
+        let result = try await service.execute(request: .init(title: "Title", body: " Body\n\n tail ", html: "<p>unused</p>", assets: [try testAssetFile().path]),
             execution: .init(taskID: task, platform: .simFixture), command: .prepare, onEvent: { _ in })
         if defect == "valid" { #expect(result == .readyForReview(message: "模拟平台已填好")) }
         else if defect == "writeFailure" {
             #expect(result.failure?.code == .operationResultUnknown)
             let log = try String(contentsOf: directory.appendingPathComponent("log"))
             #expect(!log.contains("await page.setInputFiles"))
-            #expect(!log.contains("#tags"))
         } else { #expect(result.failure?.code == .verificationFailed) }
     }
 
@@ -389,7 +411,7 @@ struct DeterministicFixtureTests {
         try Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")!.write(to: image)
         let service = DispatchService(registryFactory: { .init([FixtureChannelAdapter()]) })
         let task = UUID(); try await service.beginTask(id: task)
-        let result = try await service.execute(request: .init(title: "Fixture smoke", body: "Complete body", tags: "swift", assets: [image.path]),
+        let result = try await service.execute(request: .init(title: "Fixture smoke", body: "  **正文**\n\n\n  ```swift\n  let x = 1\n  ```\n  #AI\t##工具\n尾部 👨‍👩‍👧‍👦🖋️  ", html: " <p>explicit unused HTML</p> ", assets: [image.path]),
             execution: .init(taskID: task, platform: .simFixture), command: .prepare, onEvent: { _ in })
         #expect(result == .readyForReview(message: "模拟平台已填好"))
         let id = try #require(service.workspaceID)

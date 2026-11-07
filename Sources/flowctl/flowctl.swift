@@ -98,7 +98,7 @@ struct FlowCTL {
         let second = try EgoBridge(spaceName: task.spaceName, engine: engine, pageLabel: label)
         _ = try await second.navigate(url: fixtureURL.absoluteString)
         _ = try await second.fill(target: "#title", text: "Second channel")
-        _ = try await first.pasteHTML(target: "#editor", html: "<p>Independent content</p>", plainFallback: "Independent content")
+        _ = try await first.fill(target: "#editor", text: "Independent content")
         _ = try await first.upload(target: "#files", paths: task.assets.map(\.path))
         func value(_ output: String) throws -> [String: Any] {
             let object = try JSONSerialization.jsonObject(with: Data(output.utf8)) as? [String: Any]
@@ -112,7 +112,7 @@ struct FlowCTL {
         guard firstTitle["text"] as? String == "First channel", secondTitle["text"] as? String == "Second channel",
               body["text"] as? String == "Independent content", files["files"] as? Int == 1 else { throw DemoError("Page isolation or content verification failed") }
         _ = try await engine.runRaw(script: "const task = await taskSpace(\(name)[0]); await task.finish({keep: []}); cliLog(JSON.stringify({ok:true}));")
-        print("✅ One Space / two Pages: isolated titles, rich text and upload verified; no publish action.")
+        print("✅ One Space / two Pages: isolated titles, plain text and upload verified; no publish action.")
     }
 
     // MARK: - Space 清理
@@ -158,8 +158,7 @@ struct FlowCTL {
             article: Article(
                 title: "引擎冒烟测试",
                 markdown: "第一段：**加粗**验证。\n\n第二段：[链接](https://example.com)验证。",
-                html: "<p>第一段：<b>加粗</b>验证。</p><p>第二段：<a href=\"https://example.com\">链接</a>验证。</p>",
-                tags: ["测试"]
+                html: "<p>第一段：<b>加粗</b>验证。</p><p>第二段：<a href=\"https://example.com\">链接</a>验证。</p>"
             ),
             assets: [TaskAsset(id: "a1", fileName: tmp.lastPathComponent, mimeType: "image/png", path: tmp.path)],
             target: TaskTarget(platform: .simFixture, editorURL: fixtureURL.absoluteString)

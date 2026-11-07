@@ -51,17 +51,11 @@ async function prepare(TASK) {
     await uploadFile('input#files', TASK.assets[0].path);
   }
 
-  // 3) 正文（HTML 注入 contenteditable + 触发 input 事件）
-  const inserted = await js(
-    `(() => {
-      const ed = document.querySelector('#editor');
-      ed.innerHTML = ${JSON.stringify(TASK.article.html)};
-      ed.dispatchEvent(new Event('input', { bubbles: true }));
-      return ed.textContent.trim().length;
-    })()`
-  );
-  if (!inserted || inserted < 4) {
-    return { ok: false, phase: "failed", message: "正文写入校验失败（编辑器内容过短）" };
+  // 3) Plain text only; preserve whitespace, newlines and emoji.
+  await fillInput('#editor', TASK.article.markdown);
+  const bodyOK = await js(`document.querySelector('#editor').value === ${JSON.stringify(TASK.article.markdown)}`);
+  if (!bodyOK) {
+    return { ok: false, phase: "failed", message: "正文写入校验失败" };
   }
 
   // 4) 回读标题做最终校验

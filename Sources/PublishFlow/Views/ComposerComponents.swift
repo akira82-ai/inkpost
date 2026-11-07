@@ -72,9 +72,9 @@ struct ComposerFields: View {
                     TextField("", text: $model.title)
                         .font(InkStyle.font(expanded ? 23 : 14, weight: .semibold)).textFieldStyle(.plain)
                         .focused($titleFocused).disabled(!editable)
-                        .accessibilityLabel("标题")
+                        .accessibilityLabel("标题，选填")
                     if model.title.isEmpty {
-                        Text("给这次分享起个标题")
+                        Text("标题（选填）")
                             .font(InkStyle.font(expanded ? 23 : 14))
                             .foregroundStyle(InkStyle.placeholder)
                             .allowsHitTesting(false).accessibilityHidden(true)
@@ -89,7 +89,7 @@ struct ComposerFields: View {
                 ZStack(alignment: .topLeading) {
                     PasteEditor(text: $model.markdown, enabled: editable, onImages: onImages, onFiles: onFiles)
                     if model.markdown.isEmpty {
-                        Text("有什么想分享的？支持 Markdown，也可粘贴图片…")
+                        Text("正文（必填），支持换行和 emoji；图片选填…")
                             .font(InkStyle.font(13)).foregroundStyle(InkStyle.placeholder)
                             .lineSpacing(6).padding(.top, 5).allowsHitTesting(false)
                     }
@@ -225,7 +225,7 @@ struct AttachmentStrip: View {
                         .background(Color(hex: 0xF2F3EC), in: RoundedRectangle(cornerRadius: 8))
                         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(hex: 0xC9CDBF), style: StrokeStyle(lineWidth: 1, dash: [4])))
                         .aspectRatio(1, contentMode: .fit).contentShape(Rectangle())
-                }.buttonStyle(.plain).disabled(!editable).help("添加图片，最多 6 张").accessibilityLabel("添加图片")
+                }.buttonStyle(.plain).disabled(!editable).help("图片选填，最多 6 张").accessibilityLabel("添加图片")
             }
         }.padding(.vertical, 7)
         .onHover { _ in if NSEvent.pressedMouseButtons == 0 { dragging = nil; dropTarget = nil } }
@@ -423,7 +423,7 @@ struct DispatchAction: View {
     }
     private func act() {
         guard model.overallPhase == .pending else { controller.openWorkspace(); return }
-        guard controller.canDispatch else { model.notice = "请选择渠道并填写内容；文章渠道还需要标题"; return }
+        guard controller.canDispatch else { model.notice = "请填写正文并至少选择一个渠道；标题和图片可不填"; return }
         controller.dispatch()
     }
 }

@@ -64,10 +64,7 @@ struct ContentView: View {
                 HStack(alignment: .top, spacing: 29) {
                     VStack(spacing: 0) {
                         HStack(spacing: 18) {
-                            Text("Markdown")
-                            Text("·")
-                            Text("B").bold()
-                            Text("I").italic()
+                            Text("正文 · 必填")
                             Spacer()
                             Text("纯文本编辑").font(InkStyle.font(10))
                         }.font(InkStyle.font(12)).foregroundStyle(Color(hex: 0x929589))
@@ -77,12 +74,6 @@ struct ContentView: View {
                             ComposerFields(model: model, expanded: true, onImages: controller.pasteImage, onFiles: controller.addAssets)
                             AttachmentStrip(model: model, controller: controller)
                         }.padding(.horizontal, 23).padding(.top, 12).padding(.bottom, 12)
-                        Rectangle().fill(InkStyle.line).frame(height: 1)
-                        HStack(spacing: 9) {
-                            Text("＃").foregroundStyle(InkStyle.muted)
-                            TextField("多个话题以空格分隔", text: $model.tagsText).textFieldStyle(.plain).font(InkStyle.font(11))
-                                .disabled(model.overallPhase != .pending)
-                        }.padding(.horizontal, 18).padding(.vertical, 13)
                     }.background(Color(hex: 0xFFFEFB)).clipShape(RoundedRectangle(cornerRadius: 10))
                         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(InkStyle.line))
                         .frame(maxWidth: .infinity)

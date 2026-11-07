@@ -17,7 +17,7 @@ extension ChannelStage {
         case .validatingRequest: return "检查内容"
         case .openingEditor: return "打开编辑器"
         case .checkingLogin: return "检查登录状态"
-        case .fillingContent: return "填写正文与标签"
+        case .fillingContent: return "填写正文"
         case .uploadingAssets: return "上传图片"
         case .verifyingContent: return "校验填写结果"
         }

@@ -10,14 +10,14 @@ final class XChannelAdapter: ChannelAdapter {
     private static let editor = "[role=\"dialog\"] [data-testid=\"tweetTextarea_0\"][contenteditable=\"true\"]"
 
     func expectedBody(for request: ChannelRequest) -> String {
-        (request.title.isEmpty ? "" : request.title + "\n") + request.taggedBody
+        (request.title.isEmpty ? "" : request.title + "\n") + request.body
     }
 
     func validate(_ request: ChannelRequest) throws {
         guard !request.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               expectedBody(for: request).count <= 1899, request.assets.count <= 4 else {
             throw ChannelFailure(code: .contentUnsupported, stage: .validatingRequest,
-                detail: "X 正文必填；标题、正文及标签合计最多 1899 字，图片最多 4 张", recovery: .contentChangeRequired)
+                detail: "X 正文必填；标题和正文合计最多 1899 字，图片最多 4 张", recovery: .contentChangeRequired)
         }
     }
 

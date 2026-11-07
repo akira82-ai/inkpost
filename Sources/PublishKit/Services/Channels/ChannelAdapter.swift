@@ -8,8 +8,8 @@ public struct ChannelCapabilities {
     public let isArticle: Bool
     public let entryURL: String?
     public let maximumImages: Int
-    public init(usesTitle: Bool, maximumImages: Int, entryURL: String? = nil, isArticle: Bool = false, requiresTitle: Bool? = nil, maximumTitleCharacters: Int? = nil, maximumBodyCharacters: Int? = nil) {
-        self.requiresTitle = requiresTitle ?? usesTitle
+    public init(usesTitle: Bool, maximumImages: Int, entryURL: String? = nil, isArticle: Bool = false, requiresTitle: Bool = false, maximumTitleCharacters: Int? = nil, maximumBodyCharacters: Int? = nil) {
+        self.requiresTitle = requiresTitle
         self.maximumTitleCharacters = maximumTitleCharacters
         self.maximumBodyCharacters = maximumBodyCharacters
         self.isArticle = isArticle
@@ -21,11 +21,9 @@ public struct ChannelRequest: Equatable, Sendable {
     public let title: String
     public let body: String
     public let html: String
-    /// Exact user input; interpretation belongs to each channel workflow.
-    public let tags: String
     public let assets: [String]
-    public init(title: String, body: String, html: String = "", tags: String = "", assets: [String] = []) {
-        self.title = title; self.body = body; self.html = html; self.tags = tags; self.assets = assets
+    public init(title: String, body: String, html: String = "", assets: [String] = []) {
+        self.title = title; self.body = body; self.html = html; self.assets = assets
     }
 }
 
@@ -45,20 +43,5 @@ public struct ChannelRegistry {
     public func adapter(for platform: PlatformID) -> (any ChannelAdapter)? { adapters[platform] }
     public static var standard: ChannelRegistry {
         .init([ZhihuChannelAdapter(), JikeChannelAdapter(), XChannelAdapter(), FixtureChannelAdapter()])
-    }
-}
-
-/// Shared opt-in formatting used by the existing plain-text channel workflows.
-/// The request remains unchanged; each adapter chooses whether to use this representation.
-extension ChannelRequest {
-    public var tagText: String {
-        tags.split(whereSeparator: { $0.isWhitespace })
-            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "#")) }
-            .filter { !$0.isEmpty }
-            .map { "#" + $0 }.joined(separator: " ")
-    }
-    public var taggedBody: String {
-        let formatted = tagText
-        return body + (formatted.isEmpty ? "" : "\n\n" + formatted)
     }
 }

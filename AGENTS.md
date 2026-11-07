@@ -1,18 +1,20 @@
 # Inkpost architecture
 
+- Product content is plain text, supporting line breaks and emoji. Preserve whitespace and characters exactly. Do not render Markdown, generate HTML, use rich-text formatting, or add content processing features. Local fixtures use plain-text controls as well.
+
 - Inkpost is a foreground macOS application, not a background project or service. It differs from Echo; do not carry over Echo's background-process assumptions. Menu-bar presence is a UI mode and does not change this foreground application positioning.
 - Use SwiftUI-adapted MVC with independent services and channel adapters. MVC defines presentation/state/coordination responsibilities; the adapter pattern isolates channel implementations within services. Keep the existing macOS 14+, Swift Package Manager stack and reuse existing implementations.
 - `Sources/PublishFlow/Views/`: all UI, including pages, components, layout, styles, presentation labels, dialogs, and file pickers. Views observe `DispatchModel` and send actions to `DispatchController`. No direct browser or storage calls.
 - `Sources/PublishFlow/PublishFlowApp.swift`: composition root; assemble dependencies and scenes only.
-- `Sources/PublishKit/DispatchModel.swift`, `Models.swift`, `PlatformRules.swift`: observable state, domain data and platform rules. No SwiftUI/AppKit dependencies. Use `TargetPhase` for task phases instead of introducing parallel UI phase enums.
+- `Sources/PublishKit/DispatchModel.swift`, `Models.swift`: observable state, domain data and platform rules. No SwiftUI/AppKit dependencies. Use `TargetPhase` for task phases instead of introducing parallel UI phase enums.
 - `Sources/PublishKit/Controllers/`: coordinate dispatch, recovery, cancellation and reset; update model state through services. No UI controls, dialogs, browser scripts, HTTP or file I/O implementations.
 - `Sources/PublishKit/Services/`: configuration and external execution. Reuse EgoBridge, EgoLiteEngine and PostStore. All channel workflows are deterministic; do not add model clients, API keys, model configuration or model-driven tool execution.
 - Production dispatch passes a structured `ChannelRequest` to `DispatchServicing.execute`; never parse content or file paths from a goal prompt. Inject `DispatchServicing` to verify coordination without a browser or API key.
-- The main dispatch flow MUST pass the complete `ChannelRequest` to every selected channel adapter: title, full body, HTML, tags and the complete image/asset list. Preserve all supplied fields, including fields a channel does not use; never omit, clear, truncate or merge them based on the destination channel. User-omitted fields remain empty rather than being fabricated.
+- The main dispatch flow MUST pass the complete `ChannelRequest` to every selected channel adapter: title, full body, HTML and the complete image/asset list. Preserve all supplied fields, including fields a channel does not use; never omit, clear, truncate or merge them based on the destination channel. User-omitted fields remain empty rather than being fabricated.
 - Each channel adapter alone decides which supplied fields to use, ignore or transform for its platform, and owns the corresponding channel-specific verification. A channel ignoring a field does not authorize the main dispatch flow to remove it. Keep channel rules and channel-specific instructions out of the controller and main dispatch algorithm.
 - `Services/Channels/` contains independent `ChannelAdapter` implementations registered through a task-scoped `ChannelRegistry`. Adapters own channel rules, input validation, platform instructions, execution steps, verification and channel recovery state. The dispatch service owns adapter invocation, task/session management, Space/Page allocation, command and snapshot validation, recovery coordination and common error conversion; it must not implement channel-specific steps.
 - `ChannelContract.swift` defines fixed commands (`prepare`, `resumeAfterUser`), stage/event codes, terminal outcomes (`readyForReview`, `waitingForUser`, `failed`) and structured failures (code, stage, detail, recovery, diagnostic ID). Branch on codes/recovery only, never presentation text or model prose. UI labels belong in Views.
-- Public-layer validation covers request structure, asset validity, task identity and command legality. Channel requirements belong to adapters: whether a title is mandatory, whether image-only content is accepted, supported body formats, channel image limits. The main flow may read adapter-declared capabilities to show guidance, but must not infer that `usesTitle` means a title is mandatory or impose a nonempty-body rule on every channel. An adapter validates its own requirements before browser writes and returns a structured outcome when they are unmet. Do not use `PlatformRules` to centralize channel policies.
+- Public-layer validation covers request structure, asset validity, task identity and command legality. Channel requirements belong to adapters: whether a title is mandatory, whether image-only content is accepted, supported body formats, channel image limits. The main flow may read adapter-declared capabilities to show guidance, but must not infer that `usesTitle` means a title is mandatory or impose a nonempty-body rule on every adapter; the product editor independently requires non-whitespace body and at least one channel. An adapter validates its own requirements before browser writes and returns a structured outcome when they are unmet. Do not use `PlatformRules` to centralize channel policies.
 - A channel-specific validation, login or execution failure must not prevent other selected channels from being processed. Preserve the complete request and the failed channel's outcome for user action; task-wide cancellation or a shared task failure may stop the task.
 - Adapters verify their complete channel-specific content transformation before returning `readyForReview`; the coordinator must not independently call a second verification API. A channel may ignore or transform a field according to its documented rules, but must not silently truncate content or discard excess images to report success.
 - Every invocation carries task/platform/attempt identity. Reject stale events and results, duplicate prepare and changed-snapshot resume. Recovery reuses the original request, adapter and Page; new tasks use fresh sessions.
@@ -60,7 +62,7 @@
 
 ## Implementation alignment
 
-- The boundaries above are the architecture requirements. Documentation updates alone do not prove that the implementation conforms. Current known gaps requiring code follow-up: `DispatchController.canDispatch` can block all selected channels for missing body/title; `PlatformRules.validate` performs body/title/channel image checks before adapter execution and treats `usesTitle` as mandatory. Do not treat these existing behaviors as intended architecture or claim they were fixed by this documentation update.
+- The editor validates only product input (non-whitespace body and selected channels); DispatchService preserves the complete request and prepares task PNGs. Channel validation runs within each adapter before browser writes; a channel failure does not stop others.
 
 ## Browser workflow reliability
 
@@ -74,12 +76,12 @@
 
 - Zhihu verifies logical Draft editor blocks joined by line breaks, preserving spaces and empty paragraphs; visual innerText adds extra newlines and must not drive content equality. Its task-scoped image checkpoints retain remote origin/path identities in order (without signed query strings); changed attachments or uncertain paste results require inspection. Title requirements are independent from article classification. Never invent platform length limits; honor exposed constraints and verify actual title acceptance.
 
-知乎输入约束：标题可空，有则填写，少于 45 字（最多 44）；正文必填，连同追加标签和换行少于 1900 字（最多 1899）；图片可空。按 Swift String.count 的用户可见字符计数，中文一个字计一个字符；超限明确报错，不截断、不生成标题。
+知乎输入约束：标题可空，有则填写，少于 45 字（最多 44）；正文必填，包含换行和 emoji少于 1900 字（最多 1899）；图片可空。按 Swift String.count 的用户可见字符计数，中文一个字计一个字符；超限明确报错，不截断、不生成标题。
 
 ## X channel
 
-- X uses a deterministic compose adapter without LLM configuration. Read [X adapter maintenance](Sources/PublishKit/Services/Channels/XChannelAdapter.md) before changing it. Optional title is prepended to the first line; composed text including tags is limited to 1899 user-visible characters by product decision, with at most four pasted images. Verify actual editor acceptance and stop before Post.
-- Dispatch preserves raw title, body, tag input and ordered source assets in ChannelRequest. Tags are a raw String, not a parsed array; only adapters opt into tag formatting. Dispatch does not generate HTML; explicitly supplied HTML remains unchanged. Task-prepared PNG mappings stay separate from the original request.
+- X uses a deterministic compose adapter without LLM configuration. Read [X adapter maintenance](Sources/PublishKit/Services/Channels/XChannelAdapter.md) before changing it. Optional title is prepended to the first line; composed plain text is limited to 1899 user-visible characters by product decision, with at most four pasted images. Verify actual editor acceptance and stop before Post.
+- Dispatch preserves raw title, body, explicit HTML and ordered source assets in ChannelRequest. Dispatch does not generate HTML. Task-prepared PNG mappings stay separate from the original request.
 
 ## Deterministic channel execution
 

@@ -1,6 +1,6 @@
 # 墨驿 Inkpost
 
-当前版本：`0.9.0`
+当前版本：`0.10.0`
 
 > 「墨」承文脉，「驿」管送达——内容驿站：一次投递，各平台分发。
 
@@ -62,12 +62,11 @@ Sources/PublishKit/
   Models.swift          任务/状态数据结构（PublishTask 协议）
   EgoLiteEngine.swift   ego-browser 进程执行器（官方 stdin 调用规范）
   EgoBridge.swift       工具层（官方 helper 封装，可独立测试）
-  MarkdownLite.swift    最小 Markdown→HTML
   PostStore.swift       本地存储（Application Support/PublishFlow/posts）
   Adapters/             simulate-human.mjs 等 CLI 冒烟辅助
   Fixtures/             模拟平台页面
   DispatchModel.swift   可观察内容与运行状态（不依赖 UI）
-  PlatformRules.swift   通用输入规则（正文、标题需求、图片上限）
+  PlatformRules.swift   产品输入规则（非空白正文、至少一个渠道）
   ChannelContract.swift 固定命令、事件、结果、错误与恢复动作
   Controllers/         DispatchController：协调服务并更新 Model
   Services/            DispatchService / DispatchSettings
@@ -81,7 +80,7 @@ Sources/flowctl/        CLI（compact-smoke / prepare / finalize / cleanup）
 
 采用适配 SwiftUI 的 MVC + Services：View → Controller → Model / Services，View 观察 Model 自动刷新。所有 UI 都放在 Views 中；Controller 不依赖 SwiftUI 或 AppKit，也不实现浏览器脚本、HTTP 或文件读写。平台任务状态统一使用 PublishKit.TargetPhase。
 
-知乎想法使用固定流程：打开首页「分享此刻的想法」，有标题则填写并回读核对，再一次性粘贴完整正文及标签，再将任务预先准备的 PNG 图片逐张复制到系统剪贴板，通过 ego Lite 的 ⌘V 粘贴；每张确认上传完成后再继续。按附件卡片核对数量，仅在应用仍拥有剪贴板变更计数时恢复原内容，保留用户期间的新复制；同一任务恢复不会再次插入已确认的图片。结果不确定时停止并提示检查，最终由用户亲手发布；标题可空，有则填写独立标题，不进入文章页，也不保证平台已持久保存草稿。
+知乎想法使用固定流程：打开首页「分享此刻的想法」，有标题则填写并回读核对，再一次性粘贴完整正文，再将任务预先准备的 PNG 图片逐张复制到系统剪贴板，通过 ego Lite 的 ⌘V 粘贴；每张确认上传完成后再继续。按附件卡片核对数量，仅在应用仍拥有剪贴板变更计数时恢复原内容，保留用户期间的新复制；同一任务恢复不会再次插入已确认的图片。结果不确定时停止并提示检查，最终由用户亲手发布；标题可空，有则填写独立标题，不进入文章页，也不保证平台已持久保存草稿。
 
 GUI 使用 DispatchService 与渠道适配器，Controller 可注入 DispatchServicing 替身进行离线验证。确定性 prepare/finalize CLI 适配器保留，仅用于本地 fixture；帖子持久化尚未接入。
 
@@ -125,13 +124,13 @@ swift test --no-parallel --disable-xctest --scratch-path /tmp/inkpost-compact-bu
 点击「已填好」成功交还 ego 工作区后，编辑区恢复初始并保留渠道选择；上一份内容、图片和 Space 编号可在投递记录中查看。记录仅在本次运行内保留，不追踪发布结果；交接失败或存在未完成渠道时不清空。下一次填写使用新的 Space。
 
 
-知乎想法和 X 的标题可空；即刻使用关注页内的「分享你的想法…」编辑器，原生粘贴正文，使用图片选择器逐张上传并回读校验，标题与 HTML 不使用，停在发送前。X 直接打开撰写页，标题有则拼到正文第一行，正文及标签原生粘贴，最多逐张粘贴 4 张图片；组合文本按产品约定最多 1899 字，并检查实际账号的编辑器接受状态，最终由用户发布。完整工作台提供可展开的执行日志与渠道错误详情。
+知乎想法和 X 的标题可空；即刻使用关注页内的「分享你的想法…」编辑器，原生粘贴正文，使用图片选择器逐张上传并回读校验，标题与 HTML 不使用，停在发送前。X 直接打开撰写页，标题有则拼到正文第一行，正文原生粘贴，最多逐张粘贴 4 张图片；组合文本按产品约定最多 1899 字，并检查实际账号的编辑器接受状态，最终由用户发布。完整工作台提供可展开的执行日志与渠道错误详情。
 
 ### 渠道适配器（#9）
 
-`Services/Channels/` 按渠道隔离知乎、即刻、X 和模拟平台。`ChannelAdapter` 统一接收 `ChannelRequest`（标题、完整正文、HTML、标签、素材），声明标题需求、图片上限和入口，并负责准备、校验和恢复状态。所有已注册适配器均使用确定性流程。
+`Services/Channels/` 按渠道隔离知乎、即刻、X 和模拟平台。`ChannelAdapter` 统一接收 `ChannelRequest`（标题、完整正文、HTML、完整有序素材），声明标题需求、图片上限和入口，并负责准备、校验和恢复状态。所有已注册适配器均使用确定性流程。
 
-`DispatchService` 通过 `ChannelRegistry` 查找适配器，负责一个任务的 Space 和各渠道 Page，不包含平台步骤。注册表随新任务创建，恢复时复用原适配器与 Page；Controller 根据能力声明进行启动校验。移除了历史 goal/prepare 重载及主流程二次校验入口；`PlatformRules` 仅校验领域输入，Controller 不构造平台提示词。通用 `EgoBridge` 不含知乎分支，PNG 剪贴板保存与有条件恢复由 `ImageClipboardSession` 复用。
+`DispatchService` 通过 `ChannelRegistry` 查找适配器，负责一个任务的 Space 和各渠道 Page，不包含平台步骤。注册表随新任务创建，恢复时复用原适配器与 Page；Controller 仅校验产品必填输入。移除了历史 goal/prepare 重载及主流程二次校验入口；`PlatformRules` 仅校验产品正文与渠道选择，Controller 不构造平台提示词。通用 `EgoBridge` 不含知乎分支，PNG 剪贴板保存与有条件恢复由 `ImageClipboardSession` 复用。
 
 新增渠道：实现适配器并注册，再补充平台标识及展示信息；无需修改核心调度算法。适配器测试使用注入的 Page 工厂，无需浏览器 验证结构化输入、独立失败、页面复用、新任务隔离和能力限制。真实平台仍只填好内容，不自动发布。
 
@@ -139,18 +138,20 @@ swift test --no-parallel --disable-xctest --scratch-path /tmp/inkpost-compact-bu
 
 主流程通过 `DispatchServicing.execute` 发送结构化内容及 `prepare` / `resumeAfterUser` 命令；适配器通过 `ChannelExecutionContext` 上报固定阶段、计数进度和诊断事件，返回 `readyForReview`、`waitingForUser` 或 `failed`。错误包含稳定的 `code`、`stage`、`recovery`、具体说明及诊断编号，主流程按枚举处理，展示文案放在 Views。这里使用进程内类型协议，不引入消息队列或事件总线。
 
-`readyForReview` 表示适配器已回读校验完整的渠道转换结果：正文及标签、渠道需要的标题和图片数量。知乎另外逐张等待附件完成；通用图片校验仅证明数量，不证明图片身份或平台持久保存。正文校验保留用户空白，具体逻辑块规则由渠道定义；平台富文本换行与预期不同会转人工检查，不自动忽略差异或改写内容。
+`readyForReview` 表示适配器已回读校验完整的渠道转换结果：完整正文、渠道需要的标题和图片数量。知乎另外逐张等待附件完成；通用图片校验仅证明数量，不证明图片身份或平台持久保存。正文校验保留用户空白，具体逻辑块规则由渠道定义；平台编辑器换行与预期不同会转人工检查，不自动忽略差异或改写内容。
 
 每次调用带任务／渠道／尝试编号；迟到回调不会覆盖当前状态。恢复只接受原内容快照和允许恢复的结果，复用原适配器与 Page。新的任务重建会话。取消停止后续工具和渠道，保留内容；已经发送给浏览器的动作可能完成，取消不等于撤销。填写／上传结果不明时返回 `operationResultUnknown + inspectionRequired`，要求先检查页面再继续，避免自动重复粘贴。完整界面提供停止填写操作。
 
 共享原生粘贴服务提供互斥租约，PNG 写入按变更计数恢复剪贴板，ego Lite 的文本粘贴使用其原生恢复机制；两者不应同时占用剪贴板。
 
-测试覆盖结构化内容、登录恢复、快照不变性、重复命令、新任务隔离、过期回调、取消传播、剪贴板互斥／恢复以及真实 Fixture 适配器对漏填内容的拒绝。设置 `INKPOST_BROWSER_TESTS=1` 后运行上述 `swift test`，还会通过真实 ego Lite 执行本地 Fixture 适配器（确定性执行），回读标题／正文／标签／图片并确认没有发布；默认跳过此浏览器测试。真实渠道的登录过期、网络故障及复杂富文本仍需专项回归。
+测试覆盖结构化内容、登录恢复、快照不变性、重复命令、新任务隔离、过期回调、取消传播、剪贴板互斥／恢复以及真实 Fixture 适配器对漏填内容的拒绝。设置 `INKPOST_BROWSER_TESTS=1` 后运行上述 `swift test`，还会通过真实 ego Lite 执行本地 Fixture 适配器（确定性执行），回读标题／正文／图片并确认没有发布；默认跳过此浏览器测试。真实渠道的登录过期、网络故障及复杂输入仍需专项回归。
 
 知乎适配器按逻辑编辑块核对完整正文、空格和空段落，避免 innerText 的视觉换行误差。恢复前核对已有标题、正文及已确认附件的远程标识和顺序；发现冲突保留页面并转人工检查，不盲目重复粘贴。平台未声明标题上限时不自行编造限制，实际填写后回读确认。
 
-当前边界待跟进：Controller 仍可能因缺少正文／标题阻止整批开始，PlatformRules 仍在适配器调用前执行渠道校验。这些行为尚未达到全部渠道规则独立归适配器的目标。旧的 prepare/goal、独立 verify 接口已移除，库调用方需迁移到 execute 和 ChannelOutcome。0.7.0 同时移除 LLMConfig、模型配置参数及 agent-demo 命令，AgentDispatchService 更名为 DispatchService。
+输入边界：正文必填、标题／图片选填；Controller 不按渠道要求整批拦截，DispatchService 不执行渠道内容校验。适配器在浏览器写入前返回结构化校验结果，单渠道失败不阻止其余渠道。旧的 prepare/goal、独立 verify 接口已移除，库调用方需迁移到 execute 和 ChannelOutcome。0.7.0 同时移除 LLMConfig、模型配置参数及 agent-demo 命令，AgentDispatchService 更名为 DispatchService。
 
-知乎输入约束：标题可空，有则填写，少于 45 字（最多 44）；正文必填，连同追加标签和换行少于 1900 字（最多 1899）；图片可空。按 Swift String.count 的用户可见字符计数，中文一个字计一个字符；超限明确报错，不截断、不生成标题。
+知乎输入约束：标题可空，有则填写，少于 45 字（最多 44）；正文必填，包含换行和 emoji少于 1900 字（最多 1899）；图片可空。按 Swift String.count 的用户可见字符计数，中文一个字计一个字符；超限明确报错，不截断、不生成标题。
 
-主流程原样传递标题、正文（含 Markdown 与空白）、原始标签字符串和完整有序素材；不生成 HTML 或拆分标签。`ChannelRequest.tags` 现为原始 `String`，调用方需由标签数组迁移为原始输入。显式提供的 HTML 原样保留；渠道按自身规则选择共享标签格式化，派生内容不改变原始请求。PNG 上传映射仍由公共素材服务单独准备并随任务恢复复用。
+正文是纯文本，支持换行和 emoji，完整保留空白与字符，不渲染 Markdown、不转换 HTML。主流程原样传递标题、完整正文和有序素材；显式 HTML 仅作为未使用的兼容字段保留。产品只要求非空白正文和至少一个渠道，标题／图片选填；渠道限制由适配器自行校验，失败仅影响该渠道。PNG 上传映射由公共素材服务单独准备并随任务恢复复用。本地 fixture 同样使用纯文本输入框。
+
+0.10.0 移除独立标签输入及 `ChannelRequest`、`Article`、`Post` 的标签字段，不再自动追加标签；需要的话题文字请直接写入正文。库调用方需移除标签参数；`PlatformRules.validate` 改为产品输入判断 `canStart`，渠道校验由各适配器负责。`ChannelCapabilities.requiresTitle` 默认值改为 `false`，需要标题的适配器须显式声明。

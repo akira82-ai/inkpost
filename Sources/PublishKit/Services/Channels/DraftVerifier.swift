@@ -11,7 +11,7 @@ enum DraftVerifier {
         return value
     }
     static func verify(bridge: EgoBridge, request: ChannelRequest) async throws {
-        for (target, expected) in [("#title", request.title), ("#editor", request.body), ("#tags", request.tagText)] {
+        for (target, expected) in [("#title", request.title), ("#editor", request.body)] {
             let value = try await read(bridge: bridge, target: target)
             guard value["text"] as? String == expected else { throw failure("模拟页面字段未完整填写：\(target)") }
         }

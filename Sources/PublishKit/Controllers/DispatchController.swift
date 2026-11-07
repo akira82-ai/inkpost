@@ -22,7 +22,7 @@ public final class DispatchController {
     }
 
     public var canDispatch: Bool {
-        state.overallPhase == .pending && !state.isHandingOff && !state.selectedPlatforms.isEmpty && (!state.selectedPlatforms.contains(where: { service.capabilities(for: $0)?.requiresTitle == true }) || !state.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) && !state.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        state.overallPhase == .pending && !state.isHandingOff && PlatformRules.canStart(body: state.markdown, selectedPlatforms: state.selectedPlatforms)
     }
 
     func log(_ line: String) {
@@ -85,7 +85,7 @@ public final class DispatchController {
                 try await service.handOff()
                 if completed {
                     state.history.insert(DispatchRecord(title: state.title, markdown: state.markdown,
-                        tags: state.tagsText, platforms: state.taskPlatforms, assetPaths: state.assetPaths,
+                        platforms: state.taskPlatforms, assetPaths: state.assetPaths,
                         assetData: state.assetData, workspaceID: service.workspaceID), at: 0)
                     newDraft()
                     state.eventLog = []
@@ -132,7 +132,7 @@ public final class DispatchController {
         generation = UUID()
         let token = generation
         draftRequest = ChannelRequest(title: state.title, body: state.markdown,
-                                      tags: state.tagsText, assets: state.assetPaths)
+                                      assets: state.assetPaths)
         runningTask = Task {
             await notifier.prepare()
             do { try await service.beginTask(id: token) } catch {
@@ -224,7 +224,7 @@ public final class DispatchController {
     public func newDraft() {
         guard state.overallPhase == .awaitingConfirm else { return }
         reset()
-        state.title = ""; state.markdown = ""; state.tagsText = ""
+        state.title = ""; state.markdown = ""
         state.assetPaths = []; state.assetData = [:]
     }
     public func reset() {

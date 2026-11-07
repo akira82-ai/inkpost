@@ -8,7 +8,6 @@ public final class DispatchModel {
     // 内容
     public var title = ""
     public var markdown = ""
-    public var tagsText = ""
     public var assetPaths: [String] = []
     public var assetData: [String: Data] = [:]
 
@@ -37,7 +36,6 @@ public struct DispatchRecord: Identifiable {
     public let createdAt = Date()
     public let title: String
     public let markdown: String
-    public let tags: String
     public let platforms: [PlatformID]
     public let assetPaths: [String]
     public let assetData: [String: Data]

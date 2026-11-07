@@ -18,3 +18,5 @@
 - Offline tests cover composition, limits, unicode, login/resume, conflicting content, rejection, cancellation and repeat-run text deduplication.
 - Opt-in live test requires `INKPOST_X_LIVE=1`, `INKPOST_X_LIVE_SPACE` (an owned, existing Space name) and `INKPOST_X_LIVE_PAGE` (a fresh managed Page label). It writes generated text and images, leaves the composer open, and never publishes. Do not run against a user's existing draft.
 - Live login expiration, network failure, four-image upload and concurrent clipboard modification still require fault-injection coverage. Blob preview + enabled Post is a UI readiness check, not server-side publication or durable draft proof.
+
+- 2026-11-07: shared execution contracts no longer carry model configuration or a model-requirement capability. Browser steps and channel input rules are unchanged; offline regressions passed, with no live platform writes in this cleanup.

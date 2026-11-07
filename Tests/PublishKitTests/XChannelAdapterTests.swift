@@ -7,7 +7,7 @@ import Testing
 struct XChannelAdapterTests {
     @Test func compositionAndLimitsPreserveInput() throws {
         let adapter = XChannelAdapter()
-        #expect(!adapter.capabilities.requiresLLM)
+
         #expect(adapter.expectedBody(for: .init(title: " 标题 ", body: " 正文\n\n  尾 ", tags: ["swift"])) == " 标题 \n 正文\n\n  尾 \n\n#swift")
         #expect(adapter.expectedBody(for: .init(title: "", body: "正文")) == "正文")
         try adapter.validate(.init(title: "", body: String(repeating: "中", count: 1899), assets: ["1","2","3","4"]))
@@ -49,7 +49,7 @@ struct XChannelAdapterTests {
         let adapter = XChannelAdapter()
         func execute(_ command: ChannelCommand) async throws -> ChannelOutcome {
             let context = ChannelExecutionContext(execution: .init(taskID: UUID(), platform: .x), command: command,
-                bridge: bridge, config: .init(baseURL: "", apiKey: "", model: ""), onEvent: { _ in })
+                bridge: bridge, onEvent: { _ in })
             return try await adapter.execute(request: request, context: context)
         }
         if mode == "cancel" {
@@ -85,7 +85,7 @@ struct XChannelAdapterTests {
         let request = ChannelRequest(title: "墨驿 X 适配器验证", body: "  保留空格\n\n仅填写，不发布。", tags: ["测试"], assets: paths)
         for command in [ChannelCommand.prepare, .resumeAfterUser] {
             let context = ChannelExecutionContext(execution: .init(taskID: UUID(), platform: .x), command: command, bridge: bridge,
-                config: .init(baseURL: "", apiKey: "", model: ""), onEvent: { _ in })
+                onEvent: { _ in })
             let outcome = try await adapter.execute(request: request, context: context)
             #expect(outcome.failure == nil)
         }

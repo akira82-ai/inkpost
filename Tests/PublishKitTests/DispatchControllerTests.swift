@@ -7,7 +7,7 @@ struct DispatchControllerTests {
     private func makeController(_ service: FakeDispatchService) -> DispatchController {
         let defaults = UserDefaults(suiteName: "inkpost-tests-\(UUID().uuidString)")!
         let controller = DispatchController(service: service, settings: DispatchSettings(defaults: defaults))
-        controller.state.apiKey = "test-key"
+        controller.state.selectedPlatforms = [.zhihu, .jike, .x]
         controller.state.title = "Test title"
         controller.state.markdown = "Test **body**"
         return controller
@@ -64,18 +64,15 @@ struct DispatchControllerTests {
         #expect(controller.state.overallPhase == .awaitingConfirm)
     }
 
-    @Test func testZhihuOptionalTitleDoesNotRequireLLMKey() {
+    @Test func testZhihuOptionalTitleCanDispatch() {
         let controller = makeController(FakeDispatchService())
         controller.state.selectedPlatforms = [.zhihu]
-        controller.state.apiKey = ""
         controller.state.title = ""
         #expect(controller.canDispatch)
         controller.state.title = "想法标题"
         #expect(controller.canDispatch)
         controller.state.selectedPlatforms = [.zhihu, .x]
         #expect(controller.canDispatch)
-        controller.state.selectedPlatforms = [.zhihu, .jike]
-        #expect(!controller.canDispatch)
     }
 
     @Test func testZhihuRejectsArticleNavigationBeforeBrowserExecution() async throws {
@@ -108,15 +105,6 @@ struct DispatchControllerTests {
         #expect(service.requests.count == 3)
     }
 
-    @Test func testFullBodyAndHTMLReachAdapter() {
-        let body = String(repeating: "完整内容", count: 400)
-        let request = ChannelRequest(title: "Title", body: body, html: "<p>rich</p>", tags: ["swift"])
-        let goal = FixtureChannelAdapter().goal(for: request)
-        #expect(goal.contains(body))
-        #expect(goal.contains("<p>rich</p>"))
-        #expect(goal.contains("#swift"))
-        #expect(XChannelAdapter().expectedBody(for: request).contains("#swift"))
-    }
 
     @Test func testVerificationFailureIsNotReportedAsFilled() async throws {
         let service = FakeDispatchService()
@@ -144,8 +132,8 @@ struct DispatchControllerTests {
     @Test func testSavedChannelSelectionIncludesEmptySelection() {
         let defaults = UserDefaults(suiteName: "inkpost-channels-\(UUID().uuidString)")!
         let settings = DispatchSettings(defaults: defaults)
-        settings.savePlatforms([.jike, .x])
-        #expect(settings.selectedPlatforms() == [.jike, .x])
+        settings.savePlatforms([.zhihu, .x])
+        #expect(settings.selectedPlatforms() == [.zhihu, .x])
         settings.savePlatforms([])
         #expect(settings.selectedPlatforms().isEmpty)
     }
@@ -218,13 +206,6 @@ struct DispatchControllerTests {
         #expect(controller.state.history.isEmpty)
     }
 
-    @Test func testConfigurationUsesExistingKeys() {
-        let defaults = UserDefaults(suiteName: "inkpost-tests-\(UUID().uuidString)")!
-        let settings = DispatchSettings(defaults: defaults)
-        settings.save(apiKey: "key", model: "model")
-        #expect(defaults.string(forKey: "deepseek.apiKey") == "key")
-        #expect(settings.load().model == "model")
-    }
 
     @Test func testCancellationStopsLaterChannelsAndPreservesDraft() async throws {
         let service = FakeDispatchService(); service.pause = true
@@ -317,7 +298,7 @@ private final class FakeDispatchService: DispatchServicing {
     func beginTask(id: UUID) async throws {}
     func resumeControl() async throws {}
     func capabilities(for platform: PlatformID) -> ChannelCapabilities? { ChannelRegistry.standard.adapter(for: platform)?.capabilities }
-    func execute(request: ChannelRequest, execution: ChannelExecutionID, command: ChannelCommand, config: LLMConfig,
+    func execute(request: ChannelRequest, execution: ChannelExecutionID, command: ChannelCommand,
                  onEvent: @escaping @MainActor @Sendable (ChannelEvent) -> Void) async throws -> ChannelOutcome {
         let platform = execution.platform
         platforms.append(platform); requests.append(request)

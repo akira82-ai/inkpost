@@ -37,8 +37,6 @@ struct FlowCTL {
                 print(script)
             case "compact-smoke":
                 try await runCompactSmoke(engine: engine, fixtureURL: fixtureURL, task: task)
-            case "agent-demo":
-                try await runAgentDemo(engine: engine, fixtureURL: fixtureURL, task: task)
             default:
                 print("未知模式 \(mode)，可用: demo / prepare / finalize / cleanup")
                 exit(2)
@@ -86,48 +84,6 @@ struct FlowCTL {
         print("phase=\(r.string("phase") ?? "?")  url=\(r.string("url") ?? "-")  message=\(r.string("message") ?? "-")")
         guard r.string("phase") == "published" else { throw DemoError("尚未完成发布") }
         print("✅ 回执：\(r.string("url") ?? "")")
-    }
-
-    // MARK: - 极简 agent 管道验证（假模型，不打真实 LLM API）
-
-    static func runAgentDemo(engine: EgoLiteEngine, fixtureURL: URL, task: PublishTask) async throws {
-        let bridge = try EgoBridge(spaceName: task.spaceName, engine: engine)
-        let url = fixtureURL.absoluteString
-
-        func argsJSON(_ dict: [String: Any]) -> String {
-            let d = try! JSONSerialization.data(withJSONObject: dict)
-            return String(data: d, encoding: .utf8) ?? "{}"
-        }
-        func call(_ id: String, _ name: String, _ args: [String: Any]) -> AssistantTurn {
-            .toolCalls([ToolCall(id: id, function: .init(name: name, arguments: argsJSON(args)))])
-        }
-
-        // 假模型脚本：真实产品里这里是 GLM 等兼容模型；本演示用于验证循环与工具层管道
-        let scripted = ScriptedLLM([
-            call("t1", "navigate", ["url": url]),
-            call("t2", "fill", ["target": "input#title", "text": "agent 引擎冒烟"]),
-            call("t3", "paste_html", ["target": "#editor", "html": "<p>第一段：<b>加粗</b>验证。</p><p>第二段：agent 路线。</p>"]),
-            call("t4", "upload", ["target": "input#files", "paths": [task.assets.first?.path ?? ""]]),
-            call("t5", "inspect", ["target": "input#title"]),
-            call("t6", "finish", ["status": "draftReady", "message": "模拟平台草稿就绪", "draft_url": url]),
-        ])
-
-        print("\n== agent 填充（假模型驱动真实工具层）==")
-        let result = try await AgentExecutor.run(llm: scripted, bridge: bridge,
-            goal: "把测试内容填入模拟平台页面，停在草稿。",
-            onEvent: { print("  [agent] \($0)") })
-        guard result.status == "draftReady" else {
-            throw DemoError("agent 未能就绪：\(result.message)")
-        }
-
-        print("\n== 模拟人工确认（产品中由用户在 ego 浏览器点击）==")
-        _ = try await bridge.click(target: "#publish-btn", label: "模拟人工点击确认发布")
-        _ = try await bridge.evaluate(js: "0")
-
-        print("\n== 回读回执 ==")
-        let receipt = try await bridge.evaluate(js: "document.querySelector('#receipt') && document.querySelector('#receipt').dataset.url || ''")
-        print("  回执原始输出：\(receipt.prefix(200))")
-        print("\n✅ 极简 agent 管道端到端通过（LLM 就绪后把 ScriptedLLM 换成 OpenAICompatClient 即为真实产品）")
     }
 
     /// Verify explicit page isolation without publishing even to the fixture.

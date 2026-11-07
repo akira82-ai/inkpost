@@ -3,7 +3,7 @@ import Foundation
 @MainActor
 public protocol DispatchServicing {
     func capabilities(for platform: PlatformID) -> ChannelCapabilities?
-    func execute(request: ChannelRequest, execution: ChannelExecutionID, command: ChannelCommand, config: LLMConfig,
+    func execute(request: ChannelRequest, execution: ChannelExecutionID, command: ChannelCommand,
                  onEvent: @escaping @MainActor @Sendable (ChannelEvent) -> Void) async throws -> ChannelOutcome
     var workspaceID: Int? { get }
     func beginTask(id: UUID) async throws
@@ -12,7 +12,7 @@ public protocol DispatchServicing {
 }
 
 @MainActor
-public final class AgentDispatchService: DispatchServicing {
+public final class DispatchService: DispatchServicing {
     private var taskID: UUID?
     private var sessions: [PlatformID: (request: ChannelRequest, outcome: ChannelOutcome)] = [:]
     private var activeAttempts: [PlatformID: UUID] = [:]
@@ -76,7 +76,7 @@ public final class AgentDispatchService: DispatchServicing {
         return bridge
     }
 
-    public func execute(request: ChannelRequest, execution: ChannelExecutionID, command: ChannelCommand, config: LLMConfig,
+    public func execute(request: ChannelRequest, execution: ChannelExecutionID, command: ChannelCommand,
                         onEvent: @escaping @MainActor @Sendable (ChannelEvent) -> Void) async throws -> ChannelOutcome {
         try Task.checkCancellation()
         guard taskID == execution.taskID, activeAttempts[execution.platform] == nil else {
@@ -94,13 +94,10 @@ public final class AgentDispatchService: DispatchServicing {
         do {
             let adapter = try requiredAdapter(platform)
             try PlatformRules.validate(request, capabilities: adapter.capabilities)
-            if adapter.capabilities.requiresLLM && config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                throw ChannelFailure(code: .configurationMissing, stage: .validatingRequest, detail: "缺少模型接口配置", recovery: .retryAllowed)
-            }
             onEvent(.init(execution: execution, payload: .stage(.openingEditor)))
             let bridge = try await bridge(for: platform)
             guard taskID == execution.taskID else { throw CancellationError() }
-            context = ChannelExecutionContext(execution: execution, command: command, bridge: bridge, config: config, onEvent: onEvent)
+            context = ChannelExecutionContext(execution: execution, command: command, bridge: bridge, onEvent: onEvent)
         } catch {
             if error is CancellationError || Task.isCancelled { throw CancellationError() }
             let failure = (error as? ChannelFailure) ?? .init(code: .executionFailed, stage: .openingEditor, detail: error.localizedDescription, recovery: .retryAllowed)

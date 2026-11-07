@@ -5,7 +5,7 @@ public enum ChannelStage: String, Codable, Sendable {
     case validatingRequest, openingEditor, checkingLogin, fillingContent, uploadingAssets, verifyingContent
 }
 public enum ChannelErrorCode: String, Codable, Sendable {
-    case configurationMissing, contentUnsupported, loginRequired, editorUnavailable
+    case contentUnsupported, loginRequired, editorUnavailable
     case uploadFailed, verificationFailed, operationResultUnknown, executionFailed, invalidCommand
 }
 public enum ChannelRecovery: String, Codable, Sendable {
@@ -61,13 +61,12 @@ public final class ChannelExecutionContext {
     public let execution: ChannelExecutionID
     public let command: ChannelCommand
     public let bridge: EgoBridge
-    public let config: LLMConfig
     public private(set) var stage: ChannelStage = .validatingRequest
     private let onEvent: @MainActor @Sendable (ChannelEvent) -> Void
     private var active = true
-    public init(execution: ChannelExecutionID, command: ChannelCommand, bridge: EgoBridge, config: LLMConfig,
+    public init(execution: ChannelExecutionID, command: ChannelCommand, bridge: EgoBridge,
                 onEvent: @escaping @MainActor @Sendable (ChannelEvent) -> Void) {
-        self.execution = execution; self.command = command; self.bridge = bridge; self.config = config; self.onEvent = onEvent
+        self.execution = execution; self.command = command; self.bridge = bridge; self.onEvent = onEvent
     }
     public func advance(_ stage: ChannelStage) throws {
         try Task.checkCancellation()

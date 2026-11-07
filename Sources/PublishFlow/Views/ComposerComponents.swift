@@ -423,7 +423,6 @@ struct DispatchAction: View {
     }
     private func act() {
         guard model.overallPhase == .pending else { controller.openWorkspace(); return }
-        guard !controller.requiresModelConfiguration || !model.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { model.notice = "请在完整界面的偏好设置中配置 API Key"; return }
         guard controller.canDispatch else { model.notice = "请选择渠道并填写内容；文章渠道还需要标题"; return }
         controller.dispatch()
     }

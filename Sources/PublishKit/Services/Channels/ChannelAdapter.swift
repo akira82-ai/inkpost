@@ -6,15 +6,14 @@ public struct ChannelCapabilities {
     public let maximumTitleCharacters: Int?
     public let maximumBodyCharacters: Int?
     public let isArticle: Bool
-    public let requiresLLM: Bool
     public let entryURL: String?
     public let maximumImages: Int
-    public init(usesTitle: Bool, requiresLLM: Bool, maximumImages: Int, entryURL: String? = nil, isArticle: Bool = false, requiresTitle: Bool? = nil, maximumTitleCharacters: Int? = nil, maximumBodyCharacters: Int? = nil) {
+    public init(usesTitle: Bool, maximumImages: Int, entryURL: String? = nil, isArticle: Bool = false, requiresTitle: Bool? = nil, maximumTitleCharacters: Int? = nil, maximumBodyCharacters: Int? = nil) {
         self.requiresTitle = requiresTitle ?? usesTitle
         self.maximumTitleCharacters = maximumTitleCharacters
         self.maximumBodyCharacters = maximumBodyCharacters
         self.isArticle = isArticle
-        self.usesTitle = usesTitle; self.requiresLLM = requiresLLM; self.maximumImages = maximumImages; self.entryURL = entryURL
+        self.usesTitle = usesTitle; self.maximumImages = maximumImages; self.entryURL = entryURL
     }
 }
 
@@ -46,42 +45,6 @@ public struct ChannelRegistry {
     }
     public func adapter(for platform: PlatformID) -> (any ChannelAdapter)? { adapters[platform] }
     public static var standard: ChannelRegistry {
-        .init([ZhihuChannelAdapter(), JikeChannelAdapter(), XChannelAdapter(), FixtureChannelAdapter()])
-    }
-}
-
-/// Internal implementation detail for channels that use an LLM.
-class AgentChannelAdapter: ChannelAdapter {
-    var platform: PlatformID { preconditionFailure("Override platform") }
-    var capabilities: ChannelCapabilities { preconditionFailure("Override capabilities") }
-    let makeLLM: (LLMConfig) -> any LLMSession
-    init(makeLLM: @escaping (LLMConfig) -> any LLMSession = { OpenAICompatClient(config: $0) }) { self.makeLLM = makeLLM }
-    func goal(for request: ChannelRequest) -> String { preconditionFailure("Override platform instructions") }
-    func expectedBody(for request: ChannelRequest) -> String { request.taggedBody }
-    @MainActor
-    func verify(request: ChannelRequest, bridge: EgoBridge, result: EgoBridge.Finish) async throws {
-        try await DraftVerifier.verify(bridge: bridge, result: result, request: request, expectedBody: expectedBody(for: request), usesTitle: capabilities.usesTitle)
-    }
-    @MainActor
-    func execute(request: ChannelRequest, context: ChannelExecutionContext) async throws -> ChannelOutcome {
-        try context.advance(.openingEditor)
-        let result = try await AgentExecutor.run(llm: makeLLM(context.config), bridge: context.bridge,
-            goal: goal(for: request) + "\n恢复时先检查现有内容，不重复插入；只通过 finish 结束。",
-            onEvent: { [weak context] message in Task { @MainActor in context?.diagnostic(message) } },
-            onStage: { stage in try await context.advance(stage) })
-        try Task.checkCancellation()
-        switch result.status {
-        case "needLogin":
-            try context.advance(.checkingLogin)
-            return .waitingForUser(.init(code: .loginRequired, stage: .checkingLogin, detail: result.message, recovery: .loginRequired))
-        case "draftReady":
-            try context.advance(.verifyingContent)
-            try await verify(request: request, bridge: context.bridge, result: result)
-            return .readyForReview(message: result.message)
-        case "failed":
-            return .failed(.init(code: .executionFailed, stage: context.stage, detail: result.message, recovery: .inspectionRequired))
-        default:
-            return .failed(.init(code: .executionFailed, stage: context.stage, detail: "模型返回未知结果", recovery: .inspectionRequired))
-        }
+        .init([ZhihuChannelAdapter(), XChannelAdapter(), FixtureChannelAdapter()])
     }
 }

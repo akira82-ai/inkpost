@@ -1,24 +1,40 @@
 import Foundation
 
-final class FixtureChannelAdapter: AgentChannelAdapter {
-    override var platform: PlatformID { .simFixture }
-    override var capabilities: ChannelCapabilities { .init(usesTitle: true, requiresLLM: true, maximumImages: 6, isArticle: true) }
-    override func goal(for request: ChannelRequest) -> String {
-        let title = request.title, html = request.html, plain = request.body, assets = request.assets
-        let imageInfo = assets.isEmpty ? "无图片" : "图片 \(assets.count) 张，本地路径：\(assets.joined(separator: "；"))"
-        let opening = "把以下内容填入平台创作页，停在草稿状态（绝不点击发布/提交/发送类按钮）。\n- 标题：\(title)\n- 正文纯文本：\(plain)\n- 正文 HTML：\(html)\n- \(imageInfo)\n"
+/// Deterministic local fixture workflow; never clicks the publication control.
+final class FixtureChannelAdapter: ChannelAdapter {
+    let platform: PlatformID = .simFixture
+    let capabilities = ChannelCapabilities(usesTitle: true, maximumImages: 6, isArticle: true)
+    private var opened = false
+    private var uploadStarted = false
 
-            let fixture = (try? Resources.url("fixture-page", ext: "html", sub: "Fixtures"))?.absoluteString ?? ""
-            return opening + """
-                - 平台：模拟平台（fixture，本地页面）。入口：\(fixture)
-                - 话题内容：\(request.tagText)
-                - 标题填 input#title，正文 paste_html 到 #editor，图片 upload 到 input#files，话题填入 input#tags。
-                - finish(status:"draftReady")。
-                """
-    }
-    override func expectedBody(for request: ChannelRequest) -> String { request.body }
     @MainActor
-    override func verify(request: ChannelRequest, bridge: EgoBridge, result: EgoBridge.Finish) async throws {
-        try await DraftVerifier.verify(bridge: bridge, result: result, request: request, expectedBody: request.body, usesTitle: true, tagsTarget: "#tags")
+    func execute(request: ChannelRequest, context: ChannelExecutionContext) async throws -> ChannelOutcome {
+        try PlatformRules.validate(request, capabilities: capabilities)
+        let bridge = context.bridge
+        try context.advance(.openingEditor)
+        if !opened {
+            _ = try await bridge.navigate(url: Resources.url("fixture-page", ext: "html", sub: "Fixtures").absoluteString)
+            opened = true
+        }
+        try context.advance(.fillingContent)
+        // Preserve an existing matching field; conflicts require inspection, never overwrite.
+        for (target, expected) in [("#title", request.title), ("#editor", request.body), ("#tags", request.tagText)] {
+            let current = try await DraftVerifier.read(bridge: bridge, target: target)["text"] as? String ?? ""
+            guard current.isEmpty || current == expected else {
+                throw ChannelFailure(code: .verificationFailed, stage: .fillingContent,
+                    detail: "模拟页面已有不同内容：\(target)", recovery: .inspectionRequired)
+            }
+            if current != expected { _ = try await bridge.fill(target: target, text: expected) }
+        }
+        if !request.assets.isEmpty {
+            try context.advance(.uploadingAssets)
+            if !uploadStarted {
+                uploadStarted = true
+                _ = try await bridge.upload(target: "#files", paths: request.assets)
+            }
+        }
+        try context.advance(.verifyingContent)
+        try await DraftVerifier.verify(bridge: bridge, request: request)
+        return .readyForReview(message: "模拟平台已填好")
     }
 }

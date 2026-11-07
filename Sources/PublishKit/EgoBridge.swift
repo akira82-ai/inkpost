@@ -1,10 +1,10 @@
 import Foundation
 
-/// EgoBridge —— App 内置极简 agent 的「工具层」。
+/// EgoBridge —— 确定性渠道适配器的浏览器工具层。
 ///
 /// 每个工具调用 = 一次 ego-browser 官方调用（spawn → 执行 helper → 退出读 JSON）。
 /// 无协议、无长驻进程、无流式问题；TaskSpace 按名字跨调用恢复浏览器状态。
-/// 可脱离 LLM 独立测试（确定性）。
+/// 可通过注入传输独立测试。
 public struct EgoBridge {
     let engine: EgoLiteEngine
     public let spaceName: String
@@ -29,7 +29,7 @@ public struct EgoBridge {
         return r
     }
 
-    /// 语义快照（LLM 的眼睛）：返回 [ref=N, loc=...] 树
+    /// 语义快照：返回 [ref=N, loc=...] 树
     public func snapshot(scope: String = "full_page") async throws -> String {
         let r = try await run(
             """
@@ -83,7 +83,7 @@ public struct EgoBridge {
         return r
     }
 
-    /// 内部点击辅助；模型不直接获得任意点击工具。
+    /// 内部点击辅助。
     public func click(target: String, label: String) async throws -> String {
         let r = try await run(
             """
@@ -93,7 +93,7 @@ public struct EgoBridge {
         return r
     }
 
-    /// 内部页面求值，仅供可信实现与 fixture 使用；不暴露给模型。
+    /// 内部页面求值，仅供可信实现与 fixture 使用。
     public func evaluate(js source: String) async throws -> String {
         let r = try await run(
             """
@@ -103,23 +103,10 @@ public struct EgoBridge {
         return r
     }
 
-    /// Fixed read operation available to the model; no model-supplied JavaScript.
+    /// Read-only element inspection.
     public func inspect(target: String) async throws -> String {
         let source = "(() => { const el = document.querySelector(\(jsStr(target))); if (!el) throw new Error('element not found'); return {text: el.value ?? el.innerText ?? el.textContent ?? '', files: el.files ? el.files.length : 0, images: el.querySelectorAll('img').length}; })()"
         return try await evaluate(js: source)
-    }
-
-    /// 结束标记（供 AgentLoop 判定任务完成）
-    public struct Finish: Codable {
-        public var status: String   // draftReady | needLogin | failed
-        public var message: String
-        public var draftURL: String?
-        public var titleTarget: String?
-        public var bodyTarget: String?
-        public var imageTarget: String?
-        public init(status: String, message: String, draftURL: String? = nil) {
-            self.status = status; self.message = message; self.draftURL = draftURL
-        }
     }
 
     // MARK: - 执行内核
@@ -136,7 +123,7 @@ public struct EgoBridge {
         }
         """
         let result = try await engine.runRaw(script: script, timeout: 120)
-        // EgoLiteEngine 已提取最后一行 JSON；此处还原为字符串供上层（LLM）阅读
+        // EgoLiteEngine 已提取最后一行 JSON；此处还原为字符串供适配器读取
         if let json = result.json {
             if let err = json["error"] as? String {
                 throw BridgeError.toolFailed(err)

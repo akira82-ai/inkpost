@@ -23,3 +23,5 @@ Read this document before changing `ZhihuChannelAdapter.swift`. Common architect
 - Login expiry, network failures and concurrent user clipboard changes still need live fault-injection testing. Preserve content and report the failing step when behavior is uncertain; do not claim these cases are covered without evidence.
 
 - Verify logical Draft blocks joined by line breaks, preserving spaces and empty paragraphs; visual innerText is not the equality source. Recovery checkpoints compare ordered remote attachment origin/path identities without signed queries; replacement, reordering or unknown paste outcomes require inspection.
+
+- 2026-11-07: shared execution contracts no longer carry model configuration or a model-requirement capability. Browser steps and channel input rules are unchanged; offline regressions passed, with no live platform writes in this cleanup.

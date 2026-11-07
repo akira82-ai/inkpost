@@ -12,29 +12,17 @@ public final class DispatchController {
     @ObservationIgnored private let notifier = CompletionNotifier()
     @ObservationIgnored private var draftRequest: ChannelRequest?
     @ObservationIgnored private var attempts: [PlatformID: UUID] = [:]
-    @ObservationIgnored private var taskConfig: LLMConfig?
     @ObservationIgnored private var generation = UUID()
 
     public init(service: any DispatchServicing, settings: DispatchSettings, state: DispatchModel? = nil) {
         self.state = state ?? DispatchModel()
         self.service = service
         self.settings = settings
-        let config = settings.load()
-        self.state.apiKey = config.apiKey
-        self.state.model = config.model
         self.state.selectedPlatforms = settings.selectedPlatforms()
     }
 
-    public var requiresModelConfiguration: Bool {
-        state.selectedPlatforms.contains { service.capabilities(for: $0)?.requiresLLM != false }
-    }
-
     public var canDispatch: Bool {
-        state.overallPhase == .pending && !state.isHandingOff && !state.selectedPlatforms.isEmpty && (!state.selectedPlatforms.contains(where: { service.capabilities(for: $0)?.requiresTitle == true }) || !state.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) && !state.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (!requiresModelConfiguration || !state.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-    }
-
-    public func saveConfig() {
-        settings.save(apiKey: state.apiKey, model: state.model)
+        state.overallPhase == .pending && !state.isHandingOff && !state.selectedPlatforms.isEmpty && (!state.selectedPlatforms.contains(where: { service.capabilities(for: $0)?.requiresTitle == true }) || !state.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) && !state.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     func log(_ line: String) {
@@ -108,7 +96,7 @@ public final class DispatchController {
         }
     }
     public func resume(_ platform: PlatformID) {
-        guard state.overallPhase != .preparing, state.platformOutcomes[platform]?.canResume == true, taskConfig != nil else { return }
+        guard state.overallPhase != .preparing, state.platformOutcomes[platform]?.canResume == true, draftRequest != nil else { return }
         state.overallPhase = .preparing
         let token = generation
         runningTask = Task {
@@ -132,7 +120,6 @@ public final class DispatchController {
     // MARK: - 分发
 
     public func dispatch() {
-        saveConfig()
         guard canDispatch else { return }
         state.overallPhase = .preparing
         state.errorMessage = nil
@@ -144,7 +131,6 @@ public final class DispatchController {
         state.taskPlatforms = platforms
         generation = UUID()
         let token = generation
-        taskConfig = LLMConfig(baseURL: DispatchSettings.baseURL, apiKey: state.apiKey, model: state.model)
         let html = MarkdownLite.render(state.markdown)
         let body = state.markdown
         let tags = state.tagsText
@@ -187,19 +173,19 @@ public final class DispatchController {
             guard generation == token else { return }
             finishTask()
             if platforms.allSatisfy({ state.platformPhase[$0] == .awaitingConfirm || state.platformPhase[$0] == .needLogin }) {
-                log("全部平台处理完毕。请在 ego 浏览器逐个检查草稿并亲手发布（即刻的弹窗别关）。")
+                log("全部平台处理完毕。请在 ego 浏览器逐个检查草稿并亲手发布。")
             }
         }
     }
 
     func runOnePlatform(_ platform: PlatformID, command: ChannelCommand = .prepare) async throws {
-        guard let request = draftRequest, let config = taskConfig else { return }
+        guard let request = draftRequest else { return }
         let execution = ChannelExecutionID(taskID: generation, platform: platform)
         attempts[platform] = execution.attemptID
         defer { if attempts[platform] == execution.attemptID { attempts[platform] = nil } }
         state.currentPlatform = platform
         state.platformPhase[platform] = .preparing
-        let outcome = try await service.execute(request: request, execution: execution, command: command, config: config,
+        let outcome = try await service.execute(request: request, execution: execution, command: command,
             onEvent: { [weak self] event in self?.receive(event) })
         try Task.checkCancellation()
         guard generation == execution.taskID, attempts[platform] == execution.attemptID else { return }
@@ -257,7 +243,6 @@ public final class DispatchController {
         state.platformOutcomes = [:]; state.platformEvents = [:]; attempts = [:]
         state.taskPlatforms = []
         draftRequest = nil
-        taskConfig = nil
         state.overallPhase = .pending
         state.errorMessage = nil
         for p in state.selectedPlatforms { state.platformPhase[p] = .pending }

@@ -6,7 +6,6 @@ struct ContentView: View {
     @Bindable var model: DispatchModel
     let controller: DispatchController
     @State private var page = WorkspacePage.compose
-    @State private var settings = false
     @State private var showExecutionLog = false
     private enum WorkspacePage: String { case compose = "新的投递", tasks = "投递记录", channels = "渠道管理" }
     var body: some View {
@@ -29,7 +28,6 @@ struct ContentView: View {
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }.background(InkStyle.paper).foregroundStyle(InkStyle.ink).preferredColorScheme(.light)
             .modifier(NoticeOverlay(model: model))
-            .sheet(isPresented: $settings) { ConfigurationView(model: model, controller: controller) }
     }
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -43,10 +41,6 @@ struct ContentView: View {
                 Text("各渠道独立抵达").foregroundStyle(InkStyle.muted)
             }.font(InkStyle.font(11)).padding(.horizontal, 9).padding(.bottom, 12)
             Rectangle().fill(InkStyle.line).frame(height: 1)
-            Button { settings = true } label: {
-                Label("偏好设置", systemImage: "gearshape").font(InkStyle.font(11)).foregroundStyle(InkStyle.muted)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(10)
-            }.buttonStyle(.plain)
         }.padding(14).frame(width: 190).background(Color(hex: 0xF0F0E9))
             .overlay(alignment: .trailing) { Rectangle().fill(InkStyle.line).frame(width: 1) }
     }
@@ -218,27 +212,10 @@ struct ContentView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 Text("渠道与账号，集中管理。").font(.custom("Songti SC", size: 26))
-                Text("已接入知乎、即刻和 X。账号登录状态将在填写时检查；其余平台为待适配渠道。")
+                Text("已接入知乎和 X。账号登录状态将在填写时检查；其余平台为待适配渠道。")
                     .font(InkStyle.font(12)).foregroundStyle(InkStyle.muted)
                 channelCards
             }.padding(32)
         }
-    }
-}
-
-struct ConfigurationView: View {
-    @Bindable var model: DispatchModel
-    let controller: DispatchController
-    @Environment(\.dismiss) private var dismiss
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("偏好设置").font(.custom("Songti SC", size: 26))
-            Text("模型配置 · DeepSeek").font(InkStyle.font(12, weight: .semibold))
-            SecureField("API Key", text: $model.apiKey).textFieldStyle(.roundedBorder)
-            TextField("模型", text: $model.model).textFieldStyle(.roundedBorder)
-            Text("https://api.deepseek.com").font(InkStyle.font(11)).foregroundStyle(InkStyle.muted)
-            HStack { Spacer(); Button("完成") { controller.saveConfig(); dismiss() }.keyboardShortcut(.defaultAction) }
-        }.padding(28).frame(width: 420).background(InkStyle.paper).foregroundStyle(InkStyle.ink)
-            .preferredColorScheme(.light)
     }
 }

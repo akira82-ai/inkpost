@@ -13,12 +13,9 @@ public final class DispatchModel {
     public var assetData: [String: Data] = [:]
 
     // 平台选择
-    public var selectedPlatforms: [PlatformID] = [.zhihu, .jike, .x]
+    public var selectedPlatforms: [PlatformID] = [.zhihu, .x]
     public var platformPhase: [PlatformID: TargetPhase] = [:]
 
-    // 配置（DeepSeek）
-    public var apiKey = ""
-    public var model = "deepseek-chat"
 
     // 运行状态
     public var overallPhase: TargetPhase = .pending

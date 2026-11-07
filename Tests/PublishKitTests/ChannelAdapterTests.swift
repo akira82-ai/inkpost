@@ -5,26 +5,26 @@ import Testing
 
 @MainActor
 struct ChannelAdapterTests {
-    private let config = LLMConfig(baseURL: "https://unused.invalid", apiKey: "test", model: "test")
+
     private func bridge() throws -> EgoBridge { try EgoBridge(spaceName: "fake", engine: EgoLiteEngine(binaryPath: "/usr/bin/false")) }
 
     @Test func structuredRequestAndLoginResumeReusePage() async throws {
         let adapter = RecordingAdapter()
         var pages = 0
-        let service = AgentDispatchService(registryFactory: { .init([adapter]) }, bridgeFactory: { _ in pages += 1; return try bridge() })
+        let service = DispatchService(registryFactory: { .init([adapter]) }, bridgeFactory: { _ in pages += 1; return try bridge() })
         let task = UUID()
         try await service.beginTask(id: task)
         let request = ChannelRequest(title: "Title", body: "Complete\nbody", html: "<p>Complete</p>", tags: ["swift"], assets: ["image"])
-        let first = try await service.execute(request: request, execution: .init(taskID: task, platform: .weibo), command: .prepare, config: config, onEvent: { _ in })
+        let first = try await service.execute(request: request, execution: .init(taskID: task, platform: .weibo), command: .prepare, onEvent: { _ in })
         #expect(first.failure?.code == .loginRequired)
-        let invalid = try await service.execute(request: .init(title: "", body: "changed"), execution: .init(taskID: task, platform: .weibo), command: .resumeAfterUser, config: config, onEvent: { _ in })
+        let invalid = try await service.execute(request: .init(title: "", body: "changed"), execution: .init(taskID: task, platform: .weibo), command: .resumeAfterUser, onEvent: { _ in })
         #expect(invalid.failure?.code == .invalidCommand)
-        let second = try await service.execute(request: request, execution: .init(taskID: task, platform: .weibo), command: .resumeAfterUser, config: config, onEvent: { _ in })
+        let second = try await service.execute(request: request, execution: .init(taskID: task, platform: .weibo), command: .resumeAfterUser, onEvent: { _ in })
         #expect(second == .readyForReview(message: "verified"))
         #expect(adapter.requests == [request, request])
         #expect(adapter.commands == [.prepare, .resumeAfterUser])
         #expect(pages == 1)
-        let duplicate = try await service.execute(request: request, execution: .init(taskID: task, platform: .weibo), command: .prepare, config: config, onEvent: { _ in })
+        let duplicate = try await service.execute(request: request, execution: .init(taskID: task, platform: .weibo), command: .prepare, onEvent: { _ in })
         #expect(duplicate.failure?.code == .invalidCommand)
     }
 
@@ -32,30 +32,30 @@ struct ChannelAdapterTests {
         let adapter = RecordingAdapter(fail: true)
         let other = RecordingAdapter(platform: .jike)
         var pages = 0
-        let service = AgentDispatchService(registryFactory: { .init([adapter, other]) }, bridgeFactory: { _ in pages += 1; return try bridge() })
+        let service = DispatchService(registryFactory: { .init([adapter, other]) }, bridgeFactory: { _ in pages += 1; return try bridge() })
         let task = UUID(); try await service.beginTask(id: task)
         let request = ChannelRequest(title: "", body: "Body")
         for platform in [PlatformID.x, .weibo, .jike] {
-            let outcome = try await service.execute(request: request, execution: .init(taskID: task, platform: platform), command: .prepare, config: config, onEvent: { _ in })
+            let outcome = try await service.execute(request: request, execution: .init(taskID: task, platform: platform), command: .prepare, onEvent: { _ in })
             if platform == .x { #expect(outcome.failure?.recovery == .notRecoverable) }
             if platform == .weibo { #expect(outcome.failure?.code == .operationResultUnknown); #expect(outcome.failure?.recovery == .inspectionRequired) }
         }
         #expect(other.requests.count == 1)
         #expect(pages == 2)
-        let invalid = try await service.execute(request: .init(title: "", body: ""), execution: .init(taskID: task, platform: .weibo), command: .resumeAfterUser, config: config, onEvent: { _ in })
+        let invalid = try await service.execute(request: .init(title: "", body: ""), execution: .init(taskID: task, platform: .weibo), command: .resumeAfterUser, onEvent: { _ in })
         #expect(invalid.failure?.code == .invalidCommand)
         try await service.beginTask(id: task)
-        let tooMany = try await service.execute(request: .init(title: "", body: "Body", assets: ["a", "b"]), execution: .init(taskID: task, platform: .weibo), command: .prepare, config: config, onEvent: { _ in })
+        let tooMany = try await service.execute(request: .init(title: "", body: "Body", assets: ["a", "b"]), execution: .init(taskID: task, platform: .weibo), command: .prepare, onEvent: { _ in })
         #expect(tooMany.failure?.code == .contentUnsupported)
         #expect(pages == 2)
     }
 
     @Test func newTaskCreatesFreshAdapterSession() async throws {
         var created: [RecordingAdapter] = []
-        let service = AgentDispatchService(registryFactory: { let adapter = RecordingAdapter(); created.append(adapter); return .init([adapter]) }, bridgeFactory: { _ in try bridge() })
+        let service = DispatchService(registryFactory: { let adapter = RecordingAdapter(); created.append(adapter); return .init([adapter]) }, bridgeFactory: { _ in try bridge() })
         for _ in 0..<2 {
             let task = UUID(); try await service.beginTask(id: task)
-            let result = try await service.execute(request: .init(title: "", body: "Body"), execution: .init(taskID: task, platform: .weibo), command: .prepare, config: config, onEvent: { _ in })
+            let result = try await service.execute(request: .init(title: "", body: "Body"), execution: .init(taskID: task, platform: .weibo), command: .prepare, onEvent: { _ in })
             #expect(result.failure?.code == .loginRequired)
         }
         #expect(created.count == 3)
@@ -64,15 +64,15 @@ struct ChannelAdapterTests {
 
     @Test func finishedContextRejectsLateEventsAndCancellationPropagates() async throws {
         var events: [ChannelEvent] = []
-        let context = ChannelExecutionContext(execution: .init(taskID: UUID(), platform: .x), command: .prepare, bridge: try bridge(), config: config, onEvent: { events.append($0) })
+        let context = ChannelExecutionContext(execution: .init(taskID: UUID(), platform: .x), command: .prepare, bridge: try bridge(), onEvent: { events.append($0) })
         try context.advance(.fillingContent); context.finish()
         try context.advance(.verifyingContent); context.diagnostic("late")
         #expect(events.count == 1)
         let adapter = RecordingAdapter(cancel: true)
-        let service = AgentDispatchService(registryFactory: { .init([adapter]) }, bridgeFactory: { _ in try bridge() })
+        let service = DispatchService(registryFactory: { .init([adapter]) }, bridgeFactory: { _ in try bridge() })
         let taskID = UUID(); try await service.beginTask(id: taskID)
         do {
-            _ = try await service.execute(request: .init(title: "", body: "Body"), execution: .init(taskID: taskID, platform: .weibo), command: .prepare, config: config, onEvent: { _ in })
+            _ = try await service.execute(request: .init(title: "", body: "Body"), execution: .init(taskID: taskID, platform: .weibo), command: .prepare, onEvent: { _ in })
             Issue.record("Cancellation swallowed")
         } catch { #expect(error is CancellationError) }
     }
@@ -89,89 +89,12 @@ struct ChannelAdapterTests {
         #expect(Date().timeIntervalSince(started) < 2)
     }
 
-    @Test func agentWriteFailureStopsSubsequentTools() async throws {
-        let executable = FileManager.default.temporaryDirectory.appendingPathComponent("ego-error-\(UUID().uuidString)")
-        try "#!/bin/sh\n/bin/cat >/dev/null\necho '{\"ok\":false,\"error\":\"paste result unknown\"}'\n".write(to: executable, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
-        let bridge = try EgoBridge(spaceName: "fake", engine: EgoLiteEngine(binaryPath: executable.path))
-        let calls = [ToolCall(id: "write", function: .init(name: "fill", arguments: "{\"target\":\"#body\",\"text\":\"Body\"}")),
-                     ToolCall(id: "finish", function: .init(name: "finish", arguments: "{\"status\":\"draftReady\",\"message\":\"incorrect success\"}"))]
-        do {
-            _ = try await AgentExecutor.run(llm: ScriptedLLM([.toolCalls(calls)]), bridge: bridge, goal: "test", onEvent: { _ in })
-            Issue.record("Unknown write result allowed finish")
-        } catch {
-            #expect((error as? ChannelFailure)?.code == .operationResultUnknown)
-            #expect((error as? ChannelFailure)?.recovery == .inspectionRequired)
-        }
-    }
-
-    /// Exercise the real fixture adapter, AgentLoop and verifier with a controlled DOM transport.
-    @Test(arguments: ["valid", "body", "title", "tags", "images"])
-    func realAdapterRejectsIncompleteContent(_ defect: String) async throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let executable = directory.appendingPathComponent("ego-stub")
-        let values: [String: [String: Any]] = [
-            "#editor": ["text": defect == "body" ? "Body truncated" : "Body", "files": 0, "images": 0],
-            "#title": ["text": defect == "title" ? "wrong" : "Title"],
-            "#tags": ["text": defect == "tags" ? "" : "#swift"],
-            "#files": ["files": defect == "images" ? 0 : 1, "images": 0]
-        ]
-        let json = String(decoding: try JSONSerialization.data(withJSONObject: values), as: UTF8.self)
-        let source = """
-        #!/usr/bin/python3
-        import sys,json
-        script=sys.stdin.read()
-        values=json.loads(\(String(reflecting: json)))
-        target=next((key for key in values if key in script), None)
-        print(json.dumps({"ok":True,"value":values.get(target,{})}))
-        """
-        try source.write(to: executable, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
-        let finish = ToolCall(id: "finish", function: .init(name: "finish", arguments: "{\"status\":\"draftReady\",\"message\":\"done\",\"body_target\":\"#editor\",\"title_target\":\"#title\",\"image_target\":\"#files\"}"))
-        let adapter = FixtureChannelAdapter(makeLLM: { _ in ScriptedLLM([.toolCalls([finish])]) })
-        let service = AgentDispatchService(registryFactory: { .init([adapter]) }, bridgeFactory: { _ in try EgoBridge(spaceName: "stub", engine: EgoLiteEngine(binaryPath: executable.path)) })
-        let taskID = UUID(); try await service.beginTask(id: taskID)
-        let result = try await service.execute(request: .init(title: "Title", body: "Body", tags: ["swift"], assets: ["image"]), execution: .init(taskID: taskID, platform: .simFixture), command: .prepare, config: config, onEvent: { _ in })
-        if defect == "valid" { #expect(result == .readyForReview(message: "done")) }
-        else { #expect(result.failure?.code == .verificationFailed); #expect(result.failure?.recovery == .inspectionRequired) }
-    }
-
-    @Test(.enabled(if: ProcessInfo.processInfo.environment["INKPOST_BROWSER_TESTS"] == "1"))
-    func realFixtureAdapterBrowserSmoke() async throws {
-        let url = try Resources.url("fixture-page", ext: "html", sub: "Fixtures")
-        func call(_ name: String, _ args: [String: Any]) throws -> AssistantTurn {
-            .toolCalls([.init(id: UUID().uuidString, function: .init(name: name, arguments: String(decoding: try JSONSerialization.data(withJSONObject: args), as: UTF8.self)))])
-        }
-        let image = FileManager.default.temporaryDirectory.appendingPathComponent("contract-smoke-\(UUID().uuidString).png")
-        try Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")!.write(to: image)
-        let turns = try [
-            call("navigate", ["url": url.absoluteString]),
-            call("snapshot", [:]),
-            call("fill", ["target": "#title", "text": "Contract smoke"]),
-            call("paste_html", ["target": "#editor", "html": "<p>Complete body</p>"]),
-            call("fill", ["target": "#tags", "text": "#swift #test"]),
-            call("upload", ["target": "#files", "paths": [image.path]]),
-            call("finish", ["status": "draftReady", "message": "verified", "title_target": "#title", "body_target": "#editor", "image_target": "#files"])
-        ]
-        let adapter = FixtureChannelAdapter(makeLLM: { _ in ScriptedLLM(turns) })
-        let service = AgentDispatchService(registryFactory: { .init([adapter]) })
-        let taskID = UUID(); try await service.beginTask(id: taskID)
-        let result = try await service.execute(request: .init(title: "Contract smoke", body: "Complete body", html: "<p>Complete body</p>", tags: ["swift", "test"], assets: [image.path]), execution: .init(taskID: taskID, platform: .simFixture), command: .prepare, config: config, onEvent: { _ in })
-        #expect(result == .readyForReview(message: "verified"))
-        let id = try #require(service.workspaceID)
-        let check = try await EgoLiteEngine().runRaw(script: "const task = await taskSpace(\(id)); const page = task.page('p1'); cliLog(JSON.stringify({unpublished: await page.evaluate(() => !document.querySelector('#receipt').dataset.url)}));")
-        #expect(check.bool("unpublished") == true)
-        if result.failure == nil {
-            _ = try await EgoLiteEngine().runRaw(script: "const task = await taskSpace(\(id)); await task.finish({keep:[]}); cliLog(JSON.stringify({ok:true}));")
-        }
-    }
 
 }
 
 private final class RecordingAdapter: ChannelAdapter {
     let platform: PlatformID
-    let capabilities = ChannelCapabilities(usesTitle: false, requiresLLM: false, maximumImages: 1)
+    let capabilities = ChannelCapabilities(usesTitle: false, maximumImages: 1)
     var requests: [ChannelRequest] = []
     var commands: [ChannelCommand] = []
     let fail: Bool
@@ -223,17 +146,17 @@ struct ClipboardContractTests {
 
 @MainActor
 struct ZhihuAdapterTests {
-    private let config = LLMConfig(baseURL: "https://unused.invalid", apiKey: "", model: "unused")
+
     private let request = ChannelRequest(title: "知乎「标题」& 🖋️", body: "第一段  空格\n\n第二段", tags: ["测试"])
 
     @Test func oversizedTitleIsRejectedBeforeAllocatingPage() async throws {
         var pages = 0
-        let service = AgentDispatchService(registryFactory: { .init([ZhihuChannelAdapter()]) }, bridgeFactory: { _ in
+        let service = DispatchService(registryFactory: { .init([ZhihuChannelAdapter()]) }, bridgeFactory: { _ in
             pages += 1
             return try EgoBridge(spaceName: "unused", engine: EgoLiteEngine(binaryPath: "/usr/bin/false"))
         })
         let task = UUID(); try await service.beginTask(id: task)
-        let result = try await service.execute(request: .init(title: String(repeating: "中", count: 45), body: "正文"), execution: .init(taskID: task, platform: .zhihu), command: .prepare, config: config, onEvent: { _ in })
+        let result = try await service.execute(request: .init(title: String(repeating: "中", count: 45), body: "正文"), execution: .init(taskID: task, platform: .zhihu), command: .prepare, onEvent: { _ in })
         #expect(result.failure?.code == .contentUnsupported)
         #expect(result.failure?.recovery == .contentChangeRequired)
         #expect(pages == 0)
@@ -242,12 +165,12 @@ struct ZhihuAdapterTests {
     @Test(arguments: ["valid", "titleRejected", "bodyConflict", "login"])
     func realZhihuAdapterFillsAndVerifiesTitle(_ mode: String) async throws {
         let (bridge, log) = try transport(mode: mode)
-        let service = AgentDispatchService(registryFactory: { .init([ZhihuChannelAdapter()]) }, bridgeFactory: { _ in bridge })
+        let service = DispatchService(registryFactory: { .init([ZhihuChannelAdapter()]) }, bridgeFactory: { _ in bridge })
         let task = UUID(); try await service.beginTask(id: task)
-        var result = try await service.execute(request: request, execution: .init(taskID: task, platform: .zhihu), command: .prepare, config: config, onEvent: { _ in })
+        var result = try await service.execute(request: request, execution: .init(taskID: task, platform: .zhihu), command: .prepare, onEvent: { _ in })
         if mode == "login" {
             #expect(result.failure?.code == .loginRequired)
-            result = try await service.execute(request: request, execution: .init(taskID: task, platform: .zhihu), command: .resumeAfterUser, config: config, onEvent: { _ in })
+            result = try await service.execute(request: request, execution: .init(taskID: task, platform: .zhihu), command: .resumeAfterUser, onEvent: { _ in })
         }
         let scriptLog = try String(contentsOf: log, encoding: .utf8)
         if ["valid", "login"].contains(mode) {
@@ -339,5 +262,72 @@ struct ZhihuAdapterTests {
         try source.write(to: executable, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
         return (try EgoBridge(spaceName: "zhihu-stub", engine: EgoLiteEngine(binaryPath: executable.path)), log)
+    }
+}
+
+@MainActor
+struct DeterministicFixtureTests {
+    @Test(arguments: ["valid", "body", "title", "tags", "images", "writeFailure"])
+    func verifiesRealAdapterAndStopsUnknownWrites(_ defect: String) async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let binary = directory.appendingPathComponent("fixture-stub")
+        let source = #"""
+        #!/usr/bin/python3
+        import sys,json,pathlib,re
+        root=pathlib.Path(__file__).parent
+        script=sys.stdin.read()
+        with (root/'log').open('a') as log: log.write(script+'\n')
+        path=root/'state'
+        state=json.loads(path.read_text()) if path.exists() else {'#title':'','#editor':'','#tags':'','#files':0}
+        defect=DEFECT
+        result={'ok':True}
+        match=re.search(r'await page.fill\(("(?:\\.|[^"\\])*"), ("(?:\\.|[^"\\])*")\)',script)
+        if match:
+            key,value=map(json.loads,match.groups())
+            if defect=='writeFailure': result={'ok':False,'error':'write result unknown'}
+            else: state[key]=value
+        if 'await page.setInputFiles' in script: state['#files']=0 if defect=='images' else 1
+        if 'const el = document.querySelector' in script:
+            key=next(k for k in state if k in script)
+            value=state[key]
+            if value and defect=={'#title':'title','#editor':'body','#tags':'tags'}.get(key):value='truncated'
+            result['value']={'files':value} if key=='#files' else {'text':value}
+        path.write_text(json.dumps(state))
+        print(json.dumps(result))
+        """#.replacingOccurrences(of: "DEFECT", with: String(reflecting: defect))
+        try source.write(to: binary, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: binary.path)
+        let service = DispatchService(registryFactory: { .init([FixtureChannelAdapter()]) }, bridgeFactory: { _ in
+            try EgoBridge(spaceName: "fixture-stub", engine: EgoLiteEngine(binaryPath: binary.path))
+        })
+        let task = UUID(); try await service.beginTask(id: task)
+        let result = try await service.execute(request: .init(title: "Title", body: " Body\n\n tail ", html: "<p>unused</p>", tags: ["swift"], assets: ["image"]),
+            execution: .init(taskID: task, platform: .simFixture), command: .prepare, onEvent: { _ in })
+        if defect == "valid" { #expect(result == .readyForReview(message: "模拟平台已填好")) }
+        else if defect == "writeFailure" {
+            #expect(result.failure?.code == .operationResultUnknown)
+            let log = try String(contentsOf: directory.appendingPathComponent("log"))
+            #expect(!log.contains("await page.setInputFiles"))
+            #expect(!log.contains("#tags"))
+        } else { #expect(result.failure?.code == .verificationFailed) }
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["INKPOST_BROWSER_TESTS"] == "1"))
+    func realFixtureAdapterBrowserSmoke() async throws {
+        let image = FileManager.default.temporaryDirectory.appendingPathComponent("fixture-\(UUID().uuidString).png")
+        try Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")!.write(to: image)
+        let service = DispatchService(registryFactory: { .init([FixtureChannelAdapter()]) })
+        let task = UUID(); try await service.beginTask(id: task)
+        let result = try await service.execute(request: .init(title: "Fixture smoke", body: "Complete body", tags: ["swift"], assets: [image.path]),
+            execution: .init(taskID: task, platform: .simFixture), command: .prepare, onEvent: { _ in })
+        #expect(result == .readyForReview(message: "模拟平台已填好"))
+        let id = try #require(service.workspaceID)
+        let engine = try EgoLiteEngine()
+        let check = try await engine.runRaw(script: "const task = await taskSpace(\(id)); const page = task.page('p1'); cliLog(JSON.stringify({unpublished: await page.evaluate(() => !document.querySelector('#receipt').dataset.url)}));")
+        #expect(check.bool("unpublished") == true)
+        if result.failure == nil {
+            _ = try await engine.runRaw(script: "const task = await taskSpace(\(id)); await task.finish({keep:[]}); cliLog(JSON.stringify({ok:true}));")
+        }
     }
 }

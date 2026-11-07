@@ -14,7 +14,7 @@ extension ChannelRecovery {
 extension ChannelStage {
     var presentationText: String {
         switch self {
-        case .validatingRequest: return "检查内容与配置"
+        case .validatingRequest: return "检查内容"
         case .openingEditor: return "打开编辑器"
         case .checkingLogin: return "检查登录状态"
         case .fillingContent: return "填写正文与标签"

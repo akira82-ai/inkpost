@@ -3,7 +3,7 @@ import Foundation
 /// Deterministic compose flow; never submits the post.
 final class XChannelAdapter: ChannelAdapter {
     let platform: PlatformID = .x
-    let capabilities = ChannelCapabilities(usesTitle: false, requiresLLM: false, maximumImages: 4,
+    let capabilities = ChannelCapabilities(usesTitle: false, maximumImages: 4,
         entryURL: "https://x.com/compose/post", requiresTitle: false, maximumBodyCharacters: 1899)
     private var confirmedImages: [String] = []
     private var pendingImage = false

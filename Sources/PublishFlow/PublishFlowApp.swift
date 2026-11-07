@@ -4,7 +4,7 @@ import PublishKit
 @main
 struct PublishFlowApp: App {
     @NSApplicationDelegateAdaptor(AppLifecycle.self) private var lifecycle
-    @State private var controller = DispatchController(service: AgentDispatchService(), settings: DispatchSettings())
+    @State private var controller = DispatchController(service: DispatchService(), settings: DispatchSettings())
     var body: some Scene {
         MenuBarExtra {
             CompactView(model: controller.state, controller: controller)
@@ -14,8 +14,5 @@ struct PublishFlowApp: App {
         Window("墨驿 Inkpost", id: "workspace") {
             DispatchRootView(controller: controller)
         }.defaultSize(width: 1180, height: 780)
-        Settings {
-            ConfigurationView(model: controller.state, controller: controller)
-        }
     }
 }

@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - 平台
 
-/// 支持的平台。happy path 只实现 `simFixture`，其余为后续适配器预留。
+/// 平台身份；实际可用性由渠道注册表决定。
 public enum PlatformID: String, Codable, CaseIterable, Identifiable, Sendable {
     case simFixture = "sim-fixture" // 内置模拟平台（本地 fixture 页面）
     case zhihu

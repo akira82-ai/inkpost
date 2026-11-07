@@ -47,6 +47,8 @@
 
 ## Issue naming
 
+- 当用户说“为 #xx 创建分支对话”时，在当前项目内创建继承当前上下文的分支对话。标题格式为 `MMDD｜类型｜#序号 具体事项`，例如 `1107｜业务｜#10 修复标题填写`；日期使用 Asia/Shanghai 的创建日期，类型沿用对应 Issue 的模型／业务／视图分类，序号使用实际 Issue 编号。
+
 - Present issues as `#序号 「模型/业务/视图」具体事项`, choosing one category according to the primary scope: `模型` for domain data, state and rules; `业务` for workflow, coordination and execution; `视图` for UI, layout and interactions.
 - The title itself MUST include the literal `#` and the actual GitHub-assigned issue number, for example `#6 「视图」分发时自动隐藏窗口并显示菜单栏进度`. GitHub's separate number display does not satisfy this requirement. Never predict the number: create the issue, obtain its assigned number, then update its title to the complete format. When renaming, replace an existing numeric prefix rather than duplicating it.
 

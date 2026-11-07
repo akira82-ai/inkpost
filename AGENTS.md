@@ -72,3 +72,8 @@
 - Zhihu verifies logical Draft editor blocks joined by line breaks, preserving spaces and empty paragraphs; visual innerText adds extra newlines and must not drive content equality. Its task-scoped image checkpoints retain remote origin/path identities in order (without signed query strings); changed attachments or uncertain paste results require inspection. Title requirements are independent from article classification. Never invent platform length limits; honor exposed constraints and verify actual title acceptance.
 
 知乎输入约束：标题可空，有则填写，少于 45 字（最多 44）；正文必填，连同追加标签和换行少于 1900 字（最多 1899）；图片可空。按 Swift String.count 的用户可见字符计数，中文一个字计一个字符；超限明确报错，不截断、不生成标题。
+
+## X channel
+
+- X uses a deterministic compose adapter without LLM configuration. Read [X adapter maintenance](Sources/PublishKit/Services/Channels/XChannelAdapter.md) before changing it. Optional title is prepended to the first line; composed text including tags is limited to 1899 user-visible characters by product decision, with at most four pasted images. Verify actual editor acceptance and stop before Post.
+- Dispatch preserves the raw body, including Markdown and whitespace, when creating ChannelRequest. HTML generation and raw tag delivery remain separate follow-up work under #13.

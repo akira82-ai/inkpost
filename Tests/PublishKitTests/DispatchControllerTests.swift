@@ -33,7 +33,7 @@ struct DispatchControllerTests {
         #expect(controller.state.platformPhase[.zhihu] == .awaitingConfirm)
         #expect(controller.state.platformPhase[.jike] == .needLogin)
         #expect(controller.state.platformPhase[.x] == .failed)
-        #expect(service.requests[0].body == "Test body")
+        #expect(service.requests[0].body == "Test **body**")
         #expect(service.requests[0].tags == ["swift", "macOS"])
         #expect(service.requests[1] == service.requests[0])
         #expect(service.requests[2] == service.requests[0])
@@ -73,6 +73,8 @@ struct DispatchControllerTests {
         controller.state.title = "想法标题"
         #expect(controller.canDispatch)
         controller.state.selectedPlatforms = [.zhihu, .x]
+        #expect(controller.canDispatch)
+        controller.state.selectedPlatforms = [.zhihu, .jike]
         #expect(!controller.canDispatch)
     }
 
@@ -95,6 +97,17 @@ struct DispatchControllerTests {
         #expect(ZhihuChannelAdapter().capabilities.usesTitle == true)
     }
 
+    @Test func testDispatchPreservesBodyWhitespaceAndMarkdown() async throws {
+        let service = FakeDispatchService()
+        let controller = makeController(service)
+        let original = "  **正文**\n\n  尾部  \n"
+        controller.state.markdown = original
+        controller.dispatch()
+        try await waitForDispatch(controller)
+        #expect(service.requests.allSatisfy { $0.body == original })
+        #expect(service.requests.count == 3)
+    }
+
     @Test func testFullBodyAndHTMLReachAdapter() {
         let body = String(repeating: "完整内容", count: 400)
         let request = ChannelRequest(title: "Title", body: body, html: "<p>rich</p>", tags: ["swift"])
@@ -102,7 +115,7 @@ struct DispatchControllerTests {
         #expect(goal.contains(body))
         #expect(goal.contains("<p>rich</p>"))
         #expect(goal.contains("#swift"))
-        #expect(XChannelAdapter().goal(for: request).contains("#swift"))
+        #expect(XChannelAdapter().expectedBody(for: request).contains("#swift"))
     }
 
     @Test func testVerificationFailureIsNotReportedAsFilled() async throws {

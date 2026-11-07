@@ -1,6 +1,6 @@
 # 墨驿 Inkpost
 
-当前版本：`0.5.1`
+当前版本：`0.6.0`
 
 > 「墨」承文脉，「驿」管送达——内容驿站：一次投递，各平台分发。
 
@@ -124,11 +124,11 @@ swift test --disable-xctest --scratch-path /tmp/inkpost-compact-build \
 点击「已填好」成功交还 ego 工作区后，编辑区恢复初始并保留渠道选择；上一份内容、图片和 Space 编号可在投递记录中查看。记录仅在本次运行内保留，不追踪发布结果；交接失败或存在未完成渠道时不清空。下一次填写使用新的 Space。
 
 
-仅选择知乎想法时无需 API Key，标题可空；即刻和 X 仍需模型配置，X 最多 4 张图片。完整工作台提供可展开的执行日志与渠道错误详情。
+知乎想法和 X 无需 API Key，标题可空；即刻仍需模型配置。X 直接打开撰写页，标题有则拼到正文第一行，正文及标签原生粘贴，最多逐张粘贴 4 张图片；组合文本按产品约定最多 1899 字，并检查实际账号的编辑器接受状态，最终由用户发布。完整工作台提供可展开的执行日志与渠道错误详情。
 
 ### 渠道适配器（#9）
 
-`Services/Channels/` 按渠道隔离知乎、即刻、X 和模拟平台。`ChannelAdapter` 统一接收 `ChannelRequest`（标题、完整正文、HTML、标签、素材），声明标题／模型配置需求、图片上限和入口，并负责准备、校验和恢复状态。知乎保留确定性想法流程，其余渠道复用 Agent 执行器。
+`Services/Channels/` 按渠道隔离知乎、即刻、X 和模拟平台。`ChannelAdapter` 统一接收 `ChannelRequest`（标题、完整正文、HTML、标签、素材），声明标题／模型配置需求、图片上限和入口，并负责准备、校验和恢复状态。知乎与 X 使用各自的确定性流程，即刻和模拟渠道复用 Agent 执行器。
 
 `AgentDispatchService` 通过 `ChannelRegistry` 查找适配器，负责一个任务的 Space 和各渠道 Page，不包含平台步骤。注册表随新任务创建，恢复时复用原适配器与 Page；Controller 根据能力声明进行启动校验。移除了历史 goal/prepare 重载及主流程二次校验入口；`PlatformRules` 仅校验领域输入，Controller 不构造平台提示词。通用 `EgoBridge` 不含知乎分支，PNG 剪贴板保存与有条件恢复由 `ImageClipboardSession` 复用。
 
@@ -151,3 +151,5 @@ swift test --disable-xctest --scratch-path /tmp/inkpost-compact-build \
 当前边界待跟进：Controller 仍可能因缺少正文／标题／配置阻止整批开始，PlatformRules 仍在适配器调用前执行渠道校验，Controller 仍含即刻弹窗提示。这些行为尚未达到全部渠道规则独立归适配器的目标。旧的 prepare/goal、独立 verify 接口已移除，库调用方需迁移到 execute 和 ChannelOutcome。
 
 知乎输入约束：标题可空，有则填写，少于 45 字（最多 44）；正文必填，连同追加标签和换行少于 1900 字（最多 1899）；图片可空。按 Swift String.count 的用户可见字符计数，中文一个字计一个字符；超限明确报错，不截断、不生成标题。
+
+主流程现保留正文原始 Markdown 与空白后传入每个适配器；HTML 仍由主流程生成，标签仍经拆分及去除井号处理，#13 尚未全部完成。

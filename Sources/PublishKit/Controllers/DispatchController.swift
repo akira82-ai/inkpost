@@ -146,14 +146,14 @@ public final class DispatchController {
         let token = generation
         taskConfig = LLMConfig(baseURL: DispatchSettings.baseURL, apiKey: state.apiKey, model: state.model)
         let html = MarkdownLite.render(state.markdown)
-        let plain = MarkdownLite.plain(state.markdown)
+        let body = state.markdown
         let tags = state.tagsText
             .split(whereSeparator: { $0.isWhitespace })
             .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "#")) }
             .filter { !$0.isEmpty }
         let assets = state.assetPaths
 
-        draftRequest = ChannelRequest(title: state.title, body: plain, html: html, tags: tags, assets: assets)
+        draftRequest = ChannelRequest(title: state.title, body: body, html: html, tags: tags, assets: assets)
         runningTask = Task {
             await notifier.prepare()
             do { try await service.beginTask(id: token) } catch {

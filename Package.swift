@@ -8,7 +8,7 @@ let package = Package(
         // 核心库：协议模型、本地存储、EgoLite 引擎
         .target(
             name: "PublishKit",
-            exclude: ["Services/Channels/ZhihuChannelAdapter.md"],
+            exclude: ["Services/Channels/ZhihuChannelAdapter.md", "Services/Channels/XChannelAdapter.md"],
             resources: [
                 .copy("Adapters"),
                 .copy("Fixtures"),

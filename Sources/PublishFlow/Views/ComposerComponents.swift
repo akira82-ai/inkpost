@@ -310,6 +310,7 @@ struct ChannelPresentation: Identifiable {
         .init(id: "jike", platform: .jike, name: "即刻", badge: "即", tone: 0xC6A344),
         .init(id: "x", platform: .x, name: "X", badge: "𝕏", tone: 0x31332F),
         .init(id: "weibo", platform: .weibo, name: "微博", badge: "微", tone: 0xD85B43),
+        .init(id: "juejin", platform: .juejin, name: "掘金沸点", badge: "掘", tone: 0x1E80FF),
         .init(id: "xiaohongshu", platform: .xiaohongshu, name: "小红书", badge: "红", tone: 0xBF6256),
         .init(id: "threads", platform: nil, name: "Threads", badge: "@", tone: 0x44473F),
         .init(id: "linkedin", platform: nil, name: "LinkedIn", badge: "in", tone: 0x3776A1),

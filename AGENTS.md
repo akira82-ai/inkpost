@@ -87,3 +87,7 @@
 
 - LLM clients, tool-use loops and model configuration have been removed. Dispatch contracts carry content and execution identity only.
 - Zhihu, Jike, X and the local fixture use deterministic workflows. Read `Sources/PublishKit/Services/Channels/JikeChannelAdapter.md` before changing Jike; keep its inline composer, exact text verification and ordered attachment recovery within its adapter.
+
+## Weibo channel
+
+- Weibo opens the Quick Publish panel from the homepage “发微博” button, waits for automatic focus, and uses panel-scoped native body/PNG paste and ordered remote attachment checkpoints. Read [Weibo adapter maintenance](Sources/PublishKit/Services/Channels/WeiboChannelAdapter.md) before changing it. A nonempty title is prepended to the body with one newline, preserving both fields exactly; an empty title adds no newline. Explicit HTML is unused and the original request remains intact. Preserve existing page drafts; do not enter long-article mode or click Send.

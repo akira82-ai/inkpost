@@ -7,6 +7,7 @@ struct CompactView: View {
     let controller: DispatchController
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismiss) private var dismiss
+    @State private var bodyFocusRequest: UUID?
     var body: some View {
         composer
         .frame(width: min(420, (NSScreen.main?.visibleFrame.width ?? 1440) - 24))
@@ -16,7 +17,10 @@ struct CompactView: View {
         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.white.opacity(0.75)))
         .foregroundStyle(InkStyle.ink).preferredColorScheme(.light)
         .modifier(NoticeOverlay(model: model))
-        .onAppear { NSApp.activate(ignoringOtherApps: true) }
+        .onAppear {
+            NSApp.activate(ignoringOtherApps: true)
+            bodyFocusRequest = UUID()
+        }
     }
     private var composer: some View {
         VStack(spacing: 0) {
@@ -30,7 +34,7 @@ struct CompactView: View {
                 }
             }.padding(.top, 16).padding(.horizontal, 18).padding(.bottom, 10)
             VStack(spacing: 0) {
-                ComposerFields(model: model, onImages: controller.pasteImage, onFiles: controller.addAssets)
+                ComposerFields(model: model, bodyFocusRequest: bodyFocusRequest, onImages: controller.pasteImage, onFiles: controller.addAssets)
                 AttachmentStrip(model: model, controller: controller)
                 HStack {
                     Text("投递到")

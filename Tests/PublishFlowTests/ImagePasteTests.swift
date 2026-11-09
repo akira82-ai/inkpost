@@ -12,6 +12,30 @@ struct ImagePasteTests {
         return view
     }
 
+    @Test func bodyFocusRequestPreservesTextAndDoesNotKeepStealingFocus() async {
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let view = editor()
+        view.string = "保留已有正文🙂"
+        view.setSelectedRange(NSRange(location: 2, length: 0))
+        view.requestBodyFocus()
+        window.contentView?.addSubview(view)
+        await Task.yield()
+        #expect(window.firstResponder === view)
+        #expect(view.string == "保留已有正文🙂")
+        #expect(view.selectedRange() == NSRange(location: 2, length: 0))
+        let other = NSTextView(frame: .zero)
+        window.contentView?.addSubview(other)
+        window.makeFirstResponder(other)
+        view.layout()
+        await Task.yield()
+        #expect(window.firstResponder === other)
+        view.requestBodyFocus()
+        await Task.yield()
+        #expect(window.firstResponder === view)
+    }
+
     @Test func nativePasteNegotiatesImageTypesWithoutInsertingText() throws {
         let view = editor()
         let board = NSPasteboard.withUniqueName()

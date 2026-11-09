@@ -59,10 +59,9 @@ struct QuietIcon: View {
 struct ComposerFields: View {
     @Bindable var model: DispatchModel
     var expanded = false
+    var bodyFocusRequest: UUID?
     let onImages: (Data) -> Void
     let onFiles: ([String]) -> Void
-    @State private var editorHeight: CGFloat = 150
-    @State private var resizeStart: CGFloat?
     @FocusState private var titleFocused: Bool
     private var editable: Bool { model.overallPhase == .pending }
     var body: some View {
@@ -87,7 +86,7 @@ struct ComposerFields: View {
             Rectangle().fill(Color(hex: 0xEEEEE6)).frame(height: 1).padding(.bottom, 12)
             VStack(spacing: 0) {
                 ZStack(alignment: .topLeading) {
-                    PasteEditor(text: $model.markdown, enabled: editable, onImages: onImages, onFiles: onFiles)
+                    PasteEditor(text: $model.markdown, enabled: editable, onImages: onImages, onFiles: onFiles, focusRequest: bodyFocusRequest)
                     if model.markdown.isEmpty {
                         Text("正文（必填），支持换行和 emoji；图片选填…")
                             .font(InkStyle.font(13)).foregroundStyle(InkStyle.placeholder)
@@ -105,24 +104,9 @@ struct ComposerFields: View {
                     Text("\(model.markdown.count) 字").font(InkStyle.font(10)).monospacedDigit()
                         .foregroundStyle(InkStyle.placeholder).padding(.horizontal, 4).padding(.trailing, 20)
                 }.frame(height: 30).background(InkStyle.paper)
-                    .overlay(alignment: .bottomTrailing) {
-                        Image(systemName: "line.3.horizontal").font(.system(size: 8)).foregroundStyle(InkStyle.placeholder)
-                            .frame(width: 16, height: 16).contentShape(Rectangle())
-                            .gesture(DragGesture().onChanged { value in
-                                if resizeStart == nil { resizeStart = editorHeight }
-                                editorHeight = min(expanded ? 480 : 300, max(expanded ? 240 : 150, (resizeStart ?? 150) + value.translation.height))
-                            }.onEnded { _ in resizeStart = nil })
-                            .accessibilityElement().accessibilityLabel("调整正文高度")
-                            .accessibilityAdjustableAction { direction in
-                                switch direction {
-                                case .increment: editorHeight = min(expanded ? 480 : 300, editorHeight + 30)
-                                case .decrement: editorHeight = max(expanded ? 240 : 150, editorHeight - 30)
-                                @unknown default: break
-                                }
-                            }
-                    }
-            }.frame(height: editorHeight)
-                .onAppear { if expanded { editorHeight = 270 } }
+
+            // Six 23.4pt lines plus text insets; the 30pt footer never scrolls.
+            }.frame(height: ceil(6 * 23.4 + 10) + 30)
 
         }.foregroundStyle(InkStyle.ink)
     }
@@ -133,6 +117,7 @@ struct PasteEditor: NSViewRepresentable {
     let enabled: Bool
     let onImages: (Data) -> Void
     let onFiles: ([String]) -> Void
+    var focusRequest: UUID?
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView()
@@ -161,9 +146,15 @@ struct PasteEditor: NSViewRepresentable {
         guard let editor = scroll.documentView as? ImagePasteTextView else { return }
         if editor.string != text { editor.string = text }
         editor.isEditable = enabled; editor.onImages = onImages; editor.onFiles = onFiles
+        editor.needsLayout = true
+        if enabled, let focusRequest, context.coordinator.lastFocusRequest != focusRequest {
+            context.coordinator.lastFocusRequest = focusRequest
+            editor.requestBodyFocus()
+        }
     }
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: PasteEditor
+        var lastFocusRequest: UUID?
         init(_ parent: PasteEditor) { self.parent = parent }
         func textDidChange(_ notification: Notification) {
             if let view = notification.object as? NSTextView { parent.text = view.string }
@@ -174,6 +165,20 @@ struct PasteEditor: NSViewRepresentable {
 final class ImagePasteTextView: NSTextView {
     var onImages: ((Data) -> Void)?
     var onFiles: (([String]) -> Void)?
+    private var pendingBodyFocus = false
+    func requestBodyFocus() {
+        pendingBodyFocus = true
+        DispatchQueue.main.async { [weak self] in self?.applyPendingBodyFocus() }
+    }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        applyPendingBodyFocus()
+    }
+    private func applyPendingBodyFocus() {
+        guard pendingBodyFocus, isEditable, let window else { return }
+        pendingBodyFocus = false
+        window.makeFirstResponder(self)
+    }
     private static let imageTypes: [NSPasteboard.PasteboardType] = [.png, .tiff, .init(UTType.jpeg.identifier)]
     override var readablePasteboardTypes: [NSPasteboard.PasteboardType] {
         [.fileURL] + Self.imageTypes + super.readablePasteboardTypes.filter { !Self.imageTypes.contains($0) && $0 != .fileURL }
@@ -335,7 +340,7 @@ struct ChannelGrid: View {
     let controller: DispatchController
     var body: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
-            ForEach(ChannelPresentation.all) { channel in
+            ForEach(ChannelPresentation.all.filter(\.available)) { channel in
                 Button {
                     if channel.available, let platform = channel.platform { controller.select(platform) }
                     else { model.notice = "\(channel.name) 尚未适配，暂不可选" }
@@ -363,9 +368,9 @@ struct DispatchAction: View {
     private var filling: Bool { model.overallPhase == .preparing }
     private var title: String {
         switch model.overallPhase {
-        case .pending: return "填写到所选渠道"
+        case .pending: return "开始填写"
         case .preparing: return "正在填写 · \(model.currentPlatform?.title ?? "所选渠道")"
-        case .awaitingConfirm: return "已填好，前往确认并发布 ↗"
+        case .awaitingConfirm: return "已完成，前往发布"
         default: return "前往处理 ↗"
         }
     }
@@ -408,14 +413,14 @@ struct DispatchStatus: View {
     private var message: String {
         switch model.overallPhase {
         case .pending:
-            return "选好渠道后，开始填写。"
+            return "填好后由你确认发布。"
         case .preparing:
             let index = model.currentPlatform.flatMap { model.taskPlatforms.firstIndex(of: $0) }.map { $0 + 1 } ?? 0
             return "正在填写 \(index)/\(model.taskPlatforms.count) 个渠道，可以先忙别的，完成后我会提醒你"
         case .cancelled:
             return "已停止填写，内容已保留。正在执行的浏览器操作可能已完成，请先检查页面。"
         case .awaitingConfirm:
-            return "全部已填好。请前往浏览器检查，并亲手点击发布；墨驿的填写任务已完成。"
+            return "请在各渠道确认内容并手动发布。"
         default:
             return "部分渠道遇到问题，需要您前往浏览器手工处理。已填好的内容会保留，处理后可继续。"
         }

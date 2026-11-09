@@ -10,6 +10,8 @@ struct NativeMenuBarTests {
         let controller = DispatchController(service: DispatchService(), settings: DispatchSettings())
         let bar = NativeMenuBar(controller: controller, presentation: TaskPresentation(), openWorkspace: {})
         defer { bar.stop() }
+        #expect(bar.item.length == NSStatusItem.squareLength)
+        #expect(bar.item.button?.imagePosition == .imageOnly)
         let model = controller.state
         model.taskPlatforms = [.zhihu, .x]
         model.currentPlatform = .zhihu
@@ -51,6 +53,27 @@ struct NativeMenuBarTests {
         try await Task.sleep(for: .milliseconds(100))
         #expect(!bar.isAnimating)
         #expect(bar.item.button?.title == " 已停止")
+        model.overallPhase = .pending
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(bar.item.length == NSStatusItem.squareLength)
+        #expect(bar.item.button?.imagePosition == .imageOnly)
+    }
+
+    @Test func idleBrandGlyphIsVisuallyCentered() throws {
+        let appearance = try #require(NSAppearance(named: .aqua))
+        let image = NativeMenuBar.image(running: false, attention: false, opacity: 1, appearance: appearance)
+        let data = try #require(image.tiffRepresentation)
+        let bitmap = try #require(NSBitmapImageRep(data: data))
+        var left = bitmap.pixelsWide, right = 0, top = bitmap.pixelsHigh, bottom = 0
+        for y in 0..<bitmap.pixelsHigh {
+            for x in 0..<bitmap.pixelsWide where (bitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.1 {
+                left = min(left, x); right = max(right, x)
+                top = min(top, y); bottom = max(bottom, y)
+            }
+        }
+        #expect(left < right)
+        #expect(abs(left - (bitmap.pixelsWide - 1 - right)) <= 1)
+        #expect(abs(top - (bitmap.pixelsHigh - 1 - bottom)) <= 1)
     }
 
     @Test func dotMatchesPrototypeColorSizeAndOpacity() throws {

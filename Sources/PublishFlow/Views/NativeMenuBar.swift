@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 import SwiftUI
 import Observation
 import PublishKit
@@ -69,11 +70,13 @@ final class NativeMenuBar: NSObject, NSPopoverDelegate {
         guard let button = item.button else { return }
         // Channel events change copy here; the animation timer never writes title or length.
         button.title = state.0.isEmpty ? "" : " " + state.0
+        button.imagePosition = state.0.isEmpty ? .imageOnly : .imageLeading
         button.setAccessibilityLabel(state.0.isEmpty ? "墨驿" : "墨驿，" + state.0)
         button.toolTip = state.0.isEmpty ? "打开墨驿" : state.0 + "，点击恢复窗口"
         if animationChanged { updateAnimation() }
         let titleWidth = (button.title as NSString).size(withAttributes: [.font: button.font ?? NSFont.menuBarFont(ofSize: 0)]).width
-        item.length = ceil(titleWidth + (state.1 || state.2 ? 36 : 22) + 16)
+        item.length = state.0.isEmpty ? NSStatusItem.squareLength
+            : ceil(titleWidth + (state.1 || state.2 ? 36 : 22) + 16)
     }
 
     private func updateAnimation() {
@@ -124,10 +127,21 @@ final class NativeMenuBar: NSObject, NSPopoverDelegate {
             NSGraphicsContext.saveGraphicsState()
             NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
             appearance.performAsCurrentDrawingAppearance {
+                if !running && !attention {
+                    let line = CTLineCreateWithAttributedString(NSAttributedString(string: "墨", attributes: [
+                        .font: NSFont(name: "Songti SC", size: 18) ?? NSFont.systemFont(ofSize: 18),
+                        .foregroundColor: NSColor.labelColor
+                    ]))
+                    let bounds = CTLineGetImageBounds(line, context)
+                    context.textPosition = CGPoint(x: size.width / 2 - bounds.midX,
+                                                   y: size.height / 2 - bounds.midY)
+                    CTLineDraw(line, context)
+                } else {
                 ("墨" as NSString).draw(at: NSPoint(x: 1, y: 0), withAttributes: [
                     .font: NSFont(name: "Songti SC", size: 18) ?? NSFont.systemFont(ofSize: 18),
                     .foregroundColor: NSColor.labelColor
                 ])
+                }
                 if running {
                     context.setFillColor(CGColor(srgbRed: 82.0 / 255, green: 119.0 / 255,
                                                  blue: 91.0 / 255, alpha: opacity))

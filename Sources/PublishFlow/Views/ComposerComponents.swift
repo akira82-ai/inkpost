@@ -334,7 +334,7 @@ struct ChannelGrid: View {
     let model: DispatchModel
     let controller: DispatchController
     var body: some View {
-        ChannelGridLayout {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
             ForEach(ChannelPresentation.all) { channel in
                 Button {
                     if channel.available, let platform = channel.platform { controller.select(platform) }
@@ -352,33 +352,6 @@ struct ChannelGrid: View {
                     .accessibilityAddTraits(channel.isSelected(in: model) ? .isSelected : [])
             }
         }.transaction { $0.animation = nil }
-    }
-}
-
-// Sequential six-column packing, matching CSS grid (not dense packing).
-struct ChannelGridLayout: Layout {
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? 384
-        return CGSize(width: width, height: CGFloat(placements(width: width, subviews: subviews).last.map { $0.row + 1 } ?? 0) * 40 - 8)
-    }
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let unit = (bounds.width - 40) / 6
-        for (index, placement) in placements(width: bounds.width, subviews: subviews).enumerated() {
-            let width = CGFloat(placement.span) * unit + CGFloat(placement.span - 1) * 8
-            subviews[index].place(at: CGPoint(x: bounds.minX + CGFloat(placement.column) * (unit + 8), y: bounds.minY + CGFloat(placement.row) * 40), anchor: .topLeading, proposal: ProposedViewSize(width: width, height: 32))
-        }
-    }
-    private func placements(width: CGFloat, subviews: Subviews) -> [(row: Int, column: Int, span: Int)] {
-        let unit = (width - 40) / 6
-        var row = 0, column = 0
-        return subviews.map { view in
-            let required = view.sizeThatFits(.unspecified).width
-            let span = min(3, max(1, Int(ceil((required + 8 - 0.5) / (unit + 8)))))
-            if column + span > 6 { row += 1; column = 0 }
-            let placement = (row, column, span)
-            column += span
-            return placement
-        }
     }
 }
 

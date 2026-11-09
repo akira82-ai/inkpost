@@ -6,8 +6,7 @@ import PublishKit
 /// Main-window presentation only; task state stays in DispatchModel.
 @MainActor @Observable
 final class TaskPresentation {
-    var compactVisible = false
-    var compactFocusRequest: UUID?
+    var bodyFocusRequest: UUID?
     private var hiddenTask: UUID?
 
     func claimHide(for model: DispatchModel) -> Bool {

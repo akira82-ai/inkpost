@@ -15,9 +15,7 @@ struct TaskPresentationTests {
         model.overallPhase = .preparing
         #expect(!presentation.claimHide(for: model))
         model.currentPlatform = .zhihu
-        presentation.compactVisible = true
         #expect(presentation.claimHide(for: model))
-        presentation.compactVisible = false
         model.currentPlatform = .x
         #expect(!presentation.claimHide(for: model))
         model.overallPhase = .failed

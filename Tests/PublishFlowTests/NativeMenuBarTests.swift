@@ -1,14 +1,36 @@
 import AppKit
+import SwiftUI
 import Testing
 import PublishKit
 @testable import PublishFlow
 
 @MainActor
 struct NativeMenuBarTests {
+    private func makeMenuBar(controller: DispatchController, presentation: TaskPresentation,
+                             openSettings: @escaping () -> Void, window: NSWindow? = nil) -> NativeMenuBar {
+        let mainWindow = window ?? NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 540),
+            styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
+        if window == nil {
+            mainWindow.contentViewController = NSHostingController(rootView:
+                CompactView(model: controller.state, controller: controller, presentation: presentation))
+        }
+        return NativeMenuBar(controller: controller, presentation: presentation, openSettings: openSettings, window: mainWindow)
+    }
+
+    @Test func launchUsesAccessoryPolicyWithoutDockPresence() {
+        _ = NSApplication.shared
+        let previousPolicy = NSApp.activationPolicy()
+        defer { NSApp.setActivationPolicy(previousPolicy) }
+        let lifecycle = AppLifecycle()
+        lifecycle.applicationWillFinishLaunching(Notification(name: NSApplication.willFinishLaunchingNotification))
+        #expect(NSApp.activationPolicy() == .accessory)
+        #expect(!lifecycle.applicationShouldTerminateAfterLastWindowClosed(NSApp))
+    }
+
     @Test func nativeFramesAdvanceWithoutChangingCopyOrWidthAndStopAtCompletion() async throws {
         _ = NSApplication.shared
         let controller = DispatchController(service: DispatchService(), settings: DispatchSettings())
-        let bar = NativeMenuBar(controller: controller, presentation: TaskPresentation(), openWorkspace: {})
+        let bar = makeMenuBar(controller: controller, presentation: TaskPresentation(), openSettings: {})
         defer { bar.stop() }
         #expect(bar.item.length == NSStatusItem.squareLength)
         #expect(bar.item.button?.imagePosition == .imageOnly)
@@ -59,105 +81,107 @@ struct NativeMenuBarTests {
         #expect(bar.item.button?.imagePosition == .imageOnly)
     }
 
-    @Test func compactStaysOpenAcrossProgressAndAllTerminalStates() async throws {
+    @Test func mainWindowStaysOpenAcrossProgressAndAllTerminalStates() async throws {
         _ = NSApplication.shared
         let controller = DispatchController(service: DispatchService(), settings: DispatchSettings())
         let model = controller.state
         let presentation = TaskPresentation()
-        let bar = NativeMenuBar(controller: controller, presentation: presentation, openWorkspace: {})
+        let bar = makeMenuBar(controller: controller, presentation: presentation, openSettings: {})
         let other = NSWindow(contentRect: NSRect(x: 20, y: 20, width: 200, height: 120),
                              styleMask: [.titled], backing: .buffered, defer: false)
         other.isReleasedWhenClosed = false
         defer { bar.stop(); other.close() }
-        #expect(type(of: bar.compactWindow) == NSWindow.self)
-        #expect(bar.compactWindow.level == .normal)
-        #expect(!bar.compactWindow.hidesOnDeactivate)
+        #expect(type(of: bar.mainWindow) == NSWindow.self)
+        #expect(bar.mainWindow.level == .normal)
+        #expect(!bar.mainWindow.hidesOnDeactivate)
         bar.item.button?.performClick(nil)
         try await Task.sleep(for: .milliseconds(350))
-        #expect(bar.compactWindow.isVisible)
+        #expect(bar.mainWindow.isVisible)
         // Invalid input never starts a task or hides the UI.
         model.markdown = ""
         controller.dispatch()
         #expect(model.overallPhase == .pending)
-        #expect(bar.compactWindow.isVisible)
+        #expect(bar.mainWindow.isVisible)
         // Accepted start hides once.
         model.taskID = UUID()
         model.overallPhase = .preparing
         model.currentPlatform = .zhihu
         let hiddenDeadline = Date().addingTimeInterval(1)
-        while bar.compactWindow.isVisible && Date() < hiddenDeadline { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(!bar.compactWindow.isVisible)
-        // User restores the compact window while work continues.
+        while bar.mainWindow.isVisible && Date() < hiddenDeadline { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(!bar.mainWindow.isVisible)
+        // User restores the main window while work continues.
         bar.item.button?.performClick(nil)
         try await Task.sleep(for: .milliseconds(350))
-        #expect(bar.compactWindow.isVisible)
+        #expect(bar.mainWindow.isVisible)
         model.currentPlatform = .x
         other.makeKeyAndOrderFront(nil)
         for phase in [TargetPhase.awaitingConfirm, .failed, .cancelled, .needLogin] {
             model.overallPhase = phase
             model.currentPlatform = nil
             try await Task.sleep(for: .milliseconds(50))
-            #expect(bar.compactWindow.isVisible)
+            #expect(bar.mainWindow.isVisible)
         }
-        // Explicit menu click still closes it.
+        // Repeated menu clicks always wake the window, including while another app covers it.
+        let focus = presentation.bodyFocusRequest
         bar.item.button?.performClick(nil)
-        let deadline = Date().addingTimeInterval(1)
-        while bar.compactWindow.isVisible && Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(!bar.compactWindow.isVisible)
+        #expect(bar.mainWindow.isVisible)
+        #expect(presentation.bodyFocusRequest != focus)
     }
 
-    @Test func compactIsAnOrdinaryWindowAndCanBeCovered() async throws {
+    @Test func mainWindowIsOrdinaryAndCanBeCovered() async throws {
         _ = NSApplication.shared
         let previousPolicy = NSApp.activationPolicy()
-        NSApp.setActivationPolicy(.regular)
+        NSApp.setActivationPolicy(.accessory)
         defer { NSApp.setActivationPolicy(previousPolicy) }
         let controller = DispatchController(service: DispatchService(), settings: DispatchSettings())
         let presentation = TaskPresentation()
         let workspace = NSWindow(contentRect: NSRect(x: 20, y: 20, width: 500, height: 500),
                                  styleMask: [.titled], backing: .buffered, defer: false)
         workspace.isReleasedWhenClosed = false
-        var fullOpens = 0
-        let bar = NativeMenuBar(controller: controller, presentation: presentation, openWorkspace: { fullOpens += 1 })
-        let other = NSWindow(contentRect: bar.compactWindow.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        var settingsOpens = 0
+        let bar = makeMenuBar(controller: controller, presentation: presentation, openSettings: { settingsOpens += 1 })
+        let other = NSWindow(contentRect: bar.mainWindow.frame, styleMask: [.titled], backing: .buffered, defer: false)
         other.isReleasedWhenClosed = false
         defer { bar.stop(); workspace.close(); other.close() }
         workspace.orderFront(nil)
         bar.item.button?.performClick(nil)
         try await Task.sleep(for: .milliseconds(100))
-        #expect(type(of: bar.compactWindow) == NSWindow.self)
-        #expect(!(bar.compactWindow is NSPanel))
-        #expect(bar.compactWindow.level == .normal)
-        #expect(bar.compactWindow.canBecomeKey)
+        #expect(type(of: bar.mainWindow) == NSWindow.self)
+        #expect(!(bar.mainWindow is NSPanel))
+        #expect(bar.mainWindow.level == .normal)
+        #expect(bar.mainWindow.canBecomeKey)
         // The CLI test runner can lose activation to another application; ordering and
         // activation are separate. Verify key status only while this process is active.
-        if NSApp.isActive { #expect(bar.compactWindow.isKeyWindow) }
-        #expect(bar.compactWindow.frame.height > 400)
-        #expect(bar.compactWindow.frame.width == 420)
+        if NSApp.isActive { #expect(bar.mainWindow.isKeyWindow) }
+        #expect(bar.mainWindow.frame.height > 400)
+        #expect(bar.mainWindow.frame.width == 420)
         #expect(workspace.isVisible)
-        #expect(fullOpens == 0)
-        if let view = bar.compactWindow.contentView,
+        #expect(settingsOpens == 0)
+        if let view = bar.mainWindow.contentView,
            let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
             view.cacheDisplay(in: view.bounds, to: bitmap)
             try bitmap.representation(using: .png, properties: [:])?.write(
-                to: URL(fileURLWithPath: "/tmp/inkpost-normal-compact.png"))
+                to: URL(fileURLWithPath: "/tmp/inkpost-normal-main.png"))
         }
-        let focus = presentation.compactFocusRequest
-        other.setFrame(bar.compactWindow.frame, display: true)
+        let focus = presentation.bodyFocusRequest
+        other.setFrame(bar.mainWindow.frame, display: true)
         other.makeKeyAndOrderFront(nil)
         try await Task.sleep(for: .milliseconds(100))
         let ordered = NSApp.orderedWindows
         let front = try #require(ordered.firstIndex(of: other))
-        let back = try #require(ordered.firstIndex(of: bar.compactWindow))
+        let back = try #require(ordered.firstIndex(of: bar.mainWindow))
         #expect(front < back)
-        #expect(bar.compactWindow.isVisible)
-        #expect(bar.compactWindow.level == .normal)
-        #expect(!bar.compactWindow.isKeyWindow)
+        #expect(bar.mainWindow.isVisible)
+        #expect(bar.mainWindow.level == .normal)
+        #expect(!bar.mainWindow.isKeyWindow)
         bar.item.button?.performClick(nil)
-        #expect(!bar.compactWindow.isVisible)
-        bar.item.button?.performClick(nil)
-        #expect(bar.compactWindow.isVisible)
-        #expect(presentation.compactFocusRequest != focus)
-        #expect(fullOpens == 0)
+        #expect(bar.mainWindow.isVisible)
+        #expect(bar.mainWindow.collectionBehavior.contains(.moveToActiveSpace))
+        #expect(bar.mainWindow.collectionBehavior.contains(.fullScreenAuxiliary))
+        #expect(!bar.mainWindow.collectionBehavior.contains(.canJoinAllSpaces))
+        #expect(bar.mainWindow.tabbingMode == .disallowed)
+        #expect(presentation.bodyFocusRequest != focus)
+        #expect(settingsOpens == 0)
     }
 
     @Test func titlebarButtonsHideSameWindowAndSettingsDoNotReplaceIt() async throws {
@@ -165,23 +189,23 @@ struct NativeMenuBarTests {
         let controller = DispatchController(service: DispatchService(), settings: DispatchSettings())
         controller.state.markdown = "Original text\n\n retained"
         var settingsOpens = 0
-        let bar = NativeMenuBar(controller: controller, presentation: TaskPresentation(), openWorkspace: { settingsOpens += 1 })
+        let bar = makeMenuBar(controller: controller, presentation: TaskPresentation(), openSettings: { settingsOpens += 1 })
         defer { bar.stop() }
         bar.showMainWindow()
-        #expect(bar.compactWindow.title == "墨驿")
-        #expect(bar.compactWindow.titleVisibility == .visible)
-        #expect(bar.compactWindow.standardWindowButton(.zoomButton)?.isEnabled == false)
-        bar.compactWindow.performClose(nil)
-        #expect(!bar.compactWindow.isVisible)
+        #expect(bar.mainWindow.title == "墨驿")
+        #expect(bar.mainWindow.titleVisibility == .visible)
+        #expect(bar.mainWindow.standardWindowButton(.zoomButton)?.isEnabled == false)
+        bar.mainWindow.performClose(nil)
+        #expect(!bar.mainWindow.isVisible)
         bar.showMainWindow()
-        bar.compactWindow.standardWindowButton(.miniaturizeButton)?.performClick(nil)
-        #expect(!bar.compactWindow.isVisible)
-        #expect(!bar.compactWindow.isMiniaturized)
+        bar.mainWindow.standardWindowButton(.miniaturizeButton)?.performClick(nil)
+        #expect(!bar.mainWindow.isVisible)
+        #expect(!bar.mainWindow.isMiniaturized)
         bar.showMainWindow()
-        let gear = try #require(bar.compactWindow.titlebarAccessoryViewControllers.first?.view as? NSButton)
+        let gear = try #require(bar.mainWindow.titlebarAccessoryViewControllers.first?.view as? NSButton)
         gear.performClick(nil)
         #expect(settingsOpens == 1)
-        #expect(bar.compactWindow.isVisible)
+        #expect(bar.mainWindow.isVisible)
         #expect(controller.state.markdown == "Original text\n\n retained")
     }
 
@@ -190,16 +214,16 @@ struct NativeMenuBarTests {
         let controller = DispatchController(service: DispatchService(), settings: DispatchSettings())
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 500),
                               styleMask: [.titled], backing: .buffered, defer: false)
-        let bar = NativeMenuBar(controller: controller, presentation: TaskPresentation(), openWorkspace: {}, window: window)
+        let bar = makeMenuBar(controller: controller, presentation: TaskPresentation(), openSettings: {}, window: window)
         defer { bar.stop() }
-        #expect(bar.compactWindow === window)
+        #expect(bar.mainWindow === window)
         bar.showMainWindow()
         bar.showMainWindow()
-        #expect(bar.compactWindow === window)
+        #expect(bar.mainWindow === window)
         window.performClose(nil)
         bar.showMainWindow()
         #expect(window.isVisible)
-        #expect(bar.compactWindow === window)
+        #expect(bar.mainWindow === window)
     }
 
     @Test func idleBrandGlyphIsVisuallyCentered() throws {

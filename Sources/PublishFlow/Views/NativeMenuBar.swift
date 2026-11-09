@@ -8,10 +8,10 @@ import PublishKit
 @MainActor
 final class NativeMenuBar: NSObject, NSWindowDelegate {
     let item: NSStatusItem
-    let compactWindow: NSWindow
+    let mainWindow: NSWindow
     private let controller: DispatchController
     private let presentation: TaskPresentation
-    private let openWorkspace: () -> Void
+    private let showSettings: () -> Void
     private var pulseTimer: Timer?
     private var accessibilityObserver: NSObjectProtocol?
     private var appearanceObservation: NSKeyValueObservation?
@@ -25,48 +25,45 @@ final class NativeMenuBar: NSObject, NSWindowDelegate {
     private(set) var frameUpdates = 0
     var isAnimating: Bool { pulseTimer != nil }
 
-    init(controller: DispatchController, presentation: TaskPresentation, openWorkspace: @escaping () -> Void, window: NSWindow? = nil) {
-        compactWindow = window ?? NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 540),
-            styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
+    init(controller: DispatchController, presentation: TaskPresentation, openSettings: @escaping () -> Void, window: NSWindow) {
+        mainWindow = window
         self.controller = controller
         self.presentation = presentation
-        self.openWorkspace = openWorkspace
+        self.showSettings = openSettings
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
         guard let button = item.button else { return }
         button.target = self
-        button.action = #selector(toggle)
+        button.action = #selector(showMainWindow)
         button.imagePosition = .imageLeading
         button.font = .menuBarFont(ofSize: 0)
-        compactWindow.title = "墨驿"
-        compactWindow.styleMask = [.titled, .closable, .miniaturizable]
-        compactWindow.titleVisibility = .visible
-        compactWindow.titlebarAppearsTransparent = false
-        compactWindow.standardWindowButton(.closeButton)?.isHidden = false
-        compactWindow.standardWindowButton(.miniaturizeButton)?.isHidden = false
-        compactWindow.standardWindowButton(.miniaturizeButton)?.target = self
-        compactWindow.standardWindowButton(.miniaturizeButton)?.action = #selector(minimizeToBackground)
-        compactWindow.standardWindowButton(.zoomButton)?.isHidden = false
-        compactWindow.standardWindowButton(.zoomButton)?.isEnabled = false
-        compactWindow.collectionBehavior = [.fullScreenNone]
-        compactWindow.isReleasedWhenClosed = false
-        compactWindow.level = .normal
-        compactWindow.hidesOnDeactivate = false
-        compactWindow.delegate = self
+        mainWindow.title = "墨驿"
+        mainWindow.styleMask = [.titled, .closable, .miniaturizable]
+        mainWindow.titleVisibility = .visible
+        mainWindow.titlebarAppearsTransparent = false
+        mainWindow.standardWindowButton(.closeButton)?.isHidden = false
+        mainWindow.standardWindowButton(.miniaturizeButton)?.isHidden = false
+        mainWindow.standardWindowButton(.miniaturizeButton)?.target = self
+        mainWindow.standardWindowButton(.miniaturizeButton)?.action = #selector(minimizeToBackground)
+        mainWindow.standardWindowButton(.zoomButton)?.isHidden = false
+        mainWindow.standardWindowButton(.zoomButton)?.isEnabled = false
+        // Move the one window to the active Space on invocation; never join all Spaces.
+        // Auxiliary fullscreen presentation permits invocation over another app's fullscreen Space.
+        mainWindow.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary, .fullScreenDisallowsTiling]
+        mainWindow.tabbingMode = .disallowed
+        mainWindow.isReleasedWhenClosed = false
+        mainWindow.level = .normal
+        mainWindow.hidesOnDeactivate = false
+        mainWindow.delegate = self
         let accessory = NSTitlebarAccessoryViewController()
         let gear = NSButton(image: NSImage(systemSymbolName: "gearshape", accessibilityDescription: "设置")!,
-                            target: self, action: #selector(openSettings))
+                            target: self, action: #selector(openSettingsWindow))
         gear.isBordered = false
         gear.toolTip = "设置"
         gear.frame = NSRect(x: 0, y: 0, width: 36, height: 28)
         accessory.view = gear
         accessory.layoutAttribute = .right
-        compactWindow.addTitlebarAccessoryViewController(accessory)
-        if window == nil {
-            compactWindow.contentViewController = NSHostingController(rootView:
-                CompactView(model: controller.state, controller: controller, presentation: presentation,
-                            dismissCompact: { [weak self] in self?.hideCompact() }))
-        }
+        mainWindow.addTitlebarAccessoryViewController(accessory)
         accessibilityObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -190,50 +187,42 @@ final class NativeMenuBar: NSObject, NSWindowDelegate {
         return image
     }
 
-    @objc private func toggle() {
-        if compactWindow.isVisible { hideCompact(); return }
-        guard let button = item.button, let anchorWindow = button.window else { return }
-        let anchor = anchorWindow.convertToScreen(button.convert(button.bounds, to: nil))
-        let screen = anchorWindow.screen ?? NSScreen.main
-        let visible = screen?.visibleFrame ?? anchor
-        compactWindow.contentView?.layoutSubtreeIfNeeded()
-        let fitting = compactWindow.contentView?.fittingSize ?? NSSize(width: 420, height: 540)
-        let width = min(420, visible.width - 24)
-        let titleHeight = compactWindow.frame.height - compactWindow.contentLayoutRect.height
-        let height = min(max(1, fitting.height) + titleHeight, visible.height - 16)
-        let x = min(max(anchor.midX - width / 2, visible.minX + 8), visible.maxX - width - 8)
-        let y = max(visible.minY + 8, min(anchor.minY - 8, visible.maxY) - height)
-        compactWindow.setFrame(NSRect(x: x, y: y, width: width, height: height), display: true)
-        presentation.compactVisible = true
+    /// All explicit entry points come here, including clicks while covered or on another Space.
+    @objc func showMainWindow() {
+        // Order before activation so the window moves here instead of activating its old Space.
+        if !mainWindow.isVisible || !mainWindow.isOnActiveSpace { positionMainWindow() }
+        mainWindow.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        compactWindow.makeKeyAndOrderFront(nil)
-        presentation.compactFocusRequest = UUID()
+        presentation.bodyFocusRequest = UUID()
     }
 
-    private func hideCompact() {
-        compactWindow.orderOut(nil)
-        presentation.compactVisible = false
-    }
-
-    func showMainWindow() {
-        if !compactWindow.isVisible { toggle() }
-        else {
-            NSApp.activate(ignoringOtherApps: true)
-            compactWindow.makeKeyAndOrderFront(nil)
-            presentation.compactFocusRequest = UUID()
+    private func positionMainWindow() {
+        let anchorWindow = item.button?.window
+        let anchor = item.button.flatMap { button in
+            anchorWindow?.convertToScreen(button.convert(button.bounds, to: nil))
         }
+        let screen = anchorWindow?.screen ?? NSScreen.main
+        guard let visible = screen?.visibleFrame else { return }
+        mainWindow.contentView?.layoutSubtreeIfNeeded()
+        let fitting = mainWindow.contentView?.fittingSize ?? NSSize(width: 420, height: 540)
+        let width = min(420, visible.width - 24)
+        let titleHeight = mainWindow.frame.height - mainWindow.contentLayoutRect.height
+        let height = min(max(1, fitting.height) + titleHeight, visible.height - 16)
+        let x = min(max((anchor?.midX ?? visible.midX) - width / 2, visible.minX + 8), visible.maxX - width - 8)
+        let y = max(visible.minY + 8, min(anchor?.minY ?? visible.maxY, visible.maxY) - 8 - height)
+        mainWindow.setFrame(NSRect(x: x, y: y, width: width, height: height), display: true)
     }
 
-    @objc private func openSettings() { openWorkspace() }
-    @objc private func minimizeToBackground() { hideCompact() }
+    private func hideMainWindow() {
+        mainWindow.orderOut(nil)
+    }
+
+    @objc private func openSettingsWindow() { showSettings() }
+    @objc private func minimizeToBackground() { hideMainWindow() }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        hideCompact()
+        hideMainWindow()
         return false
-    }
-
-    func windowWillClose(_ notification: Notification) {
-        if notification.object as? NSWindow === compactWindow { presentation.compactVisible = false }
     }
 
     func stop() {
@@ -245,8 +234,8 @@ final class NativeMenuBar: NSObject, NSWindowDelegate {
         }
         accessibilityObserver = nil
         appearanceObservation = nil
-        compactWindow.delegate = nil
-        compactWindow.close()
+        mainWindow.delegate = nil
+        mainWindow.close()
         NSStatusBar.system.removeStatusItem(item)
     }
 }

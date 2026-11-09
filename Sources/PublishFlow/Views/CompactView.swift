@@ -6,7 +6,6 @@ struct CompactView: View {
     @Bindable var model: DispatchModel
     let controller: DispatchController
     let presentation: TaskPresentation
-    var dismissCompact: (() -> Void)? = nil
     @State private var showExecutionLog = false
     @State private var mainWindow: NSWindow?
     var body: some View {
@@ -17,16 +16,12 @@ struct CompactView: View {
         .background(WindowReader { mainWindow = $0 })
         .foregroundStyle(InkStyle.ink).preferredColorScheme(.light)
         .modifier(NoticeOverlay(model: model))
-        .modifier(TaskWindowPresentation(model: model, presentation: presentation, dismiss: { closeCompact() }))
-    }
-    private func closeCompact() {
-        if let dismissCompact { dismissCompact() }
-        else { mainWindow?.orderOut(nil); presentation.compactVisible = false }
+        .modifier(TaskWindowPresentation(model: model, presentation: presentation, dismiss: { mainWindow?.orderOut(nil) }))
     }
     private var composer: some View {
         VStack(spacing: 0) {
             VStack(spacing: 0) {
-                ComposerFields(model: model, bodyFocusRequest: presentation.compactFocusRequest, onImages: controller.pasteImage, onFiles: controller.addAssets)
+                ComposerFields(model: model, bodyFocusRequest: presentation.bodyFocusRequest, onImages: controller.pasteImage, onFiles: controller.addAssets)
                 AttachmentStrip(model: model, controller: controller)
                 HStack {
                     Text("投递到")

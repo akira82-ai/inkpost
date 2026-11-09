@@ -6,26 +6,21 @@ import PublishKit
 final class AppLifecycle: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     private var controller: DispatchController?
     private var pendingNotificationRoutes: [(UUID?, Int?)] = []
-    private var showWorkspace: (() -> Void)?
     private var menuBar: NativeMenuBar?
-    func installMenuBar(controller: DispatchController, presentation: TaskPresentation, window: NSWindow, openWorkspace: @escaping () -> Void) {
+    func installMenuBar(controller: DispatchController, presentation: TaskPresentation, window: NSWindow, openSettings: @escaping () -> Void) {
         guard menuBar == nil else { return }
         self.controller = controller
-        self.showWorkspace = { [weak self] in self?.menuBar?.showMainWindow() }
         let pending = pendingNotificationRoutes
         pendingNotificationRoutes = []
         Task { for (taskID, workspaceID) in pending { await self.openNotification(taskID: taskID, workspaceID: workspaceID) } }
-        menuBar = NativeMenuBar(controller: controller, presentation: presentation, openWorkspace: openWorkspace, window: window)
-        presentation.compactVisible = true
-        presentation.compactFocusRequest = UUID()
+        menuBar = NativeMenuBar(controller: controller, presentation: presentation, openSettings: openSettings, window: window)
+        showMainWindow()
     }
     func applicationWillTerminate(_ notification: Notification) { menuBar?.stop() }
     func applicationWillFinishLaunching(_ notification: Notification) {
+        // Match LSUIElement before any window is shown, including unbundled development runs.
+        NSApp.setActivationPolicy(.accessory)
         if Bundle.main.bundleURL.pathExtension == "app" { UNUserNotificationCenter.current().delegate = self }
-    }
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
     }
     func showMainWindow() { menuBar?.showMainWindow() }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -50,7 +45,7 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, UNUserNotificationCen
         }
         guard let taskID, let workspaceID, workspaceID > 0 else {
             controller.state.notice = "这条通知没有可打开的浏览器工作区，请查看任务状态"
-            showWorkspace?()
+            showMainWindow()
             return
         }
         await controller.openNotificationWorkspace(taskID: taskID, workspaceID: workspaceID)

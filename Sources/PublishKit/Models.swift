@@ -64,7 +64,7 @@ public struct TaskTarget: Codable {
     public var editorURL: String
 }
 
-/// 发布任务：Swift 侧生成，写入任务目录 task.json，适配器脚本读取。
+/// CLI 模拟任务：编码后内嵌到脚本，交给本地模拟适配器读取。
 public struct PublishTask: Codable {
     public init(postId: String, spaceName: String, article: Article, assets: [TaskAsset], target: TaskTarget) {
         self.postId = postId; self.spaceName = spaceName; self.article = article
@@ -136,33 +136,5 @@ public struct Post: Codable, Identifiable {
             targetStates.append(s)
         }
         updatedAt = Date()
-    }
-}
-
-// MARK: - 引擎事件（events.ndjson 中的行）
-
-public enum EngineEvent: Decodable {
-    case stage(message: String)
-    case draftReady(draftURL: String?, spaceID: Int?)
-    case published(url: String)
-    case error(message: String)
-
-    private enum CodingKeys: String, CodingKey { case type, message, draftURL, spaceID, url }
-
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        switch try c.decode(String.self, forKey: .type) {
-        case "stage":
-            self = .stage(message: try c.decodeIfPresent(String.self, forKey: .message) ?? "")
-        case "draftReady":
-            self = .draftReady(draftURL: try c.decodeIfPresent(String.self, forKey: .draftURL),
-                               spaceID: try c.decodeIfPresent(Int.self, forKey: .spaceID))
-        case "published":
-            self = .published(url: try c.decode(String.self, forKey: .url))
-        case "error":
-            self = .error(message: try c.decode(String.self, forKey: .message))
-        case let other:
-            throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "未知事件类型 \(other)")
-        }
     }
 }

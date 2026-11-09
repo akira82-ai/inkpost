@@ -24,21 +24,6 @@ extension Color {
     }
 }
 
-struct InkBrand: View {
-    var compact = true
-    var body: some View {
-        HStack(spacing: 8) {
-            Text("墨").font(.custom("Songti SC", size: compact ? 17 : 20))
-                .foregroundStyle(InkStyle.paper).frame(width: compact ? 27 : 32, height: compact ? 27 : 32)
-                .background(InkStyle.ink, in: RoundedRectangle(cornerRadius: 7))
-            VStack(alignment: .leading, spacing: 2) {
-                Text("墨驿").font(InkStyle.font(compact ? 14 : 16)).tracking(2)
-                Text(compact ? "INKPOST · 快速投递" : "INKPOST").font(InkStyle.font(9)).foregroundStyle(InkStyle.muted)
-            }
-        }.foregroundStyle(InkStyle.ink)
-    }
-}
-
 struct QuietIcon: View {
     let symbol: String
     let label: String
@@ -58,7 +43,6 @@ struct QuietIcon: View {
 
 struct ComposerFields: View {
     @Bindable var model: DispatchModel
-    var expanded = false
     var bodyFocusRequest: UUID?
     let onImages: (Data) -> Void
     let onFiles: ([String]) -> Void
@@ -69,12 +53,12 @@ struct ComposerFields: View {
             HStack(spacing: 0) {
                 ZStack(alignment: .leading) {
                     TextField("", text: $model.title)
-                        .font(InkStyle.font(expanded ? 23 : 14, weight: .semibold)).textFieldStyle(.plain)
+                        .font(InkStyle.font(14, weight: .semibold)).textFieldStyle(.plain)
                         .focused($titleFocused).disabled(!editable)
                         .accessibilityLabel("标题，选填")
                     if model.title.isEmpty {
                         Text("标题（选填）")
-                            .font(InkStyle.font(expanded ? 23 : 14))
+                            .font(InkStyle.font(14))
                             .foregroundStyle(InkStyle.placeholder)
                             .allowsHitTesting(false).accessibilityHidden(true)
                     }

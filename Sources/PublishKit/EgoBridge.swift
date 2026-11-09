@@ -49,30 +49,6 @@ public struct EgoBridge {
         return r
     }
 
-    /// 向 contenteditable 富文本编辑器注入 HTML（编辑器自身管线消化插入内容）
-    public func pasteHTML(target: String, html: String, plainFallback: String) async throws -> String {
-        // 以拼接方式生成 js() 源码；HTML 经 JSON 字符串字面量嵌入，天然转义安全
-        let source =
-            "(() => {" +
-            "  const sel = \(jsStr(target));" +
-            "  const el = (document.activeElement && document.activeElement.isContentEditable)" +
-            "    ? document.activeElement : document.querySelector(sel);" +
-            "  if (!el) throw new Error('editor not found');" +
-            "  el.focus();" +
-            "  document.execCommand('insertHTML', false, \(jsStr(html)));" +
-            "  el.dispatchEvent(new Event('input', { bubbles: true }));" +
-            "  return el.textContent.length;" +
-            "})()"
-        let r = try await run(
-            """
-            await page.click(\(jsStr(target)), { label: '聚焦编辑器' });
-            const len = await page.evaluate(\(jsStr(source)));
-            cliLog(JSON.stringify({ ok: true, textLength: len }));
-            """)
-        _ = plainFallback
-        return r
-    }
-
     /// 上传本地文件到 input[type=file]
     public func upload(target: String, paths: [String]) async throws -> String {
         let r = try await run(

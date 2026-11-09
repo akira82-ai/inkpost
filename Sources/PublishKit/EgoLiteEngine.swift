@@ -15,8 +15,8 @@ public struct StepResult {
 /// 只依赖官方调用规范（lite.ego.app/docs/ego-browser）：
 ///   `ego-browser nodejs < script`   —— stdin 喂一段 Node 脚本，脚本用官方 helper 操作浏览器。
 ///
-/// 一次调用 = 一步（prepare 填充 / finalize 回读），进程退出后读结果 JSON。
-/// 无常驻进程、无实时进度流、无 IPC；失败重试 = 再跑一次（Space 会被按名字恢复）。
+/// 每次调用启动一个子进程，执行一段脚本并读取结果 JSON。
+/// 生产渠道通过 EgoBridge 调用 runRaw；恢复由任务服务与渠道适配器协调。
 public struct EgoLiteEngine {
     public let binaryPath: String
 
@@ -49,7 +49,7 @@ public struct EgoLiteEngine {
         }
     }
 
-    // MARK: - 两个产品级步骤
+    // MARK: - CLI 模拟流程
 
     /// 填充：打开目标平台编辑页，填入内容，停在可编辑草稿。
     /// 返回的 JSON 里约定含 `phase`（awaitingConfirm / failed）与 `message`。

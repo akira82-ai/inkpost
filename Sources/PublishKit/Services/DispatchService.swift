@@ -9,6 +9,14 @@ public protocol DispatchServicing {
     func beginTask(id: UUID) async throws
     func handOff() async throws
     func resumeControl() async throws
+    func openWorkspace(id: Int) async throws
+}
+
+public extension DispatchServicing {
+    func openWorkspace(id: Int) async throws {
+        guard workspaceID == id else { throw EgoBridge.BridgeError.toolFailed("通知对应的工作区无法打开") }
+        try await handOff()
+    }
 }
 
 @MainActor
@@ -46,6 +54,19 @@ public final class DispatchService: DispatchServicing {
         if handedOff { return }
         _ = try await EgoLiteEngine().runRaw(script: "const task = await taskSpace(\(id)); await task.handOff(); cliLog(JSON.stringify({ok:true}));")
         handedOff = true
+    }
+    /// Explicit notification clicks authorize opening this exact Space, never the current task by inference.
+    public func openWorkspace(id: Int) async throws {
+        guard id > 0 else { throw EgoBridge.BridgeError.toolFailed("无效的浏览器工作区") }
+        if id == spaceID, !handedOff {
+            guard activeAttempts.isEmpty else { throw EgoBridge.BridgeError.toolFailed("此工作区仍在填写中，请完成后再打开") }
+            try await handOff()
+            return
+        }
+        // A handed-off Agent Space cannot be reopened with taskSpace(). Resume only on the
+        // user's explicit click and immediately hand it back; never run editor operations here.
+        _ = try await EgoLiteEngine().runRaw(script: "const task = await takeOverTaskSpace(\(id)); await task.handOff(); cliLog(JSON.stringify({ok:true}));")
+        if id == spaceID { handedOff = true }
     }
     public func resumeControl() async throws {
         guard handedOff, let id = spaceID else { return }

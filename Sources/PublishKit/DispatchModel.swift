@@ -17,6 +17,7 @@ public final class DispatchModel {
 
 
     // 运行状态
+    public var taskID: UUID?
     public var overallPhase: TargetPhase = .pending
     public var eventLog: [String] = []
     public var errorMessage: String?
@@ -40,4 +41,20 @@ public struct DispatchRecord: Identifiable {
     public let assetPaths: [String]
     public let assetData: [String: Data]
     public let workspaceID: Int?
+}
+
+/// Immutable completion facts for notification presentation. Diagnostic text stays in channel logs.
+public struct DispatchCompletion {
+    public let taskID: UUID?
+    public let workspaceID: Int?
+    public let phase: TargetPhase
+    public let platforms: [PlatformID]
+    public let phases: [PlatformID: TargetPhase]
+    public let failures: [PlatformID: ChannelFailure]
+
+    public init(taskID: UUID?, workspaceID: Int?, phase: TargetPhase, platforms: [PlatformID],
+                phases: [PlatformID: TargetPhase], failures: [PlatformID: ChannelFailure]) {
+        self.taskID = taskID; self.workspaceID = workspaceID; self.phase = phase
+        self.platforms = platforms; self.phases = phases; self.failures = failures
+    }
 }

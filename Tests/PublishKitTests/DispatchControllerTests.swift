@@ -4,9 +4,9 @@ import Testing
 
 @MainActor
 struct DispatchControllerTests {
-    private func makeController(_ service: FakeDispatchService) -> DispatchController {
+    private func makeController(_ service: FakeDispatchService, onCompletion: @escaping @MainActor (DispatchCompletion) -> Void = { _ in }) -> DispatchController {
         let defaults = UserDefaults(suiteName: "inkpost-tests-\(UUID().uuidString)")!
-        let controller = DispatchController(service: service, settings: DispatchSettings(defaults: defaults))
+        let controller = DispatchController(service: service, settings: DispatchSettings(defaults: defaults), onCompletion: onCompletion)
         controller.state.selectedPlatforms = [.zhihu, .jike, .x]
         controller.state.title = "Test title"
         controller.state.markdown = "Test **body**"
@@ -19,6 +19,59 @@ struct DispatchControllerTests {
             try await Task.sleep(nanoseconds: 1_000_000)
         }
         #expect(controller.state.overallPhase != .preparing, "Dispatch timed out")
+    }
+
+    @Test func completionSnapshotPreservesOriginalTaskAndFailureForPresentation() async throws {
+        let service = FakeDispatchService()
+        service.statuses = [.jike: "needLogin"]
+        var notices: [DispatchCompletion] = []
+        let controller = makeController(service, onCompletion: { notices.append($0) })
+        controller.dispatch()
+        let taskID = controller.state.taskID
+        try await waitForDispatch(controller)
+        let notice = try #require(notices.first)
+        #expect(notices.count == 1)
+        #expect(notice.taskID == taskID)
+        #expect(notice.workspaceID == 42)
+        #expect(notice.phases[.zhihu] == .awaitingConfirm)
+        #expect(notice.phases[.jike] == .needLogin)
+        #expect(notice.failures[.jike]?.detail == "login")
+        controller.reset()
+        #expect(notice.taskID == taskID)
+        #expect(notice.workspaceID == 42)
+        #expect(notice.failures[.jike]?.detail == "login")
+    }
+
+    @Test func notificationOpensItsOriginalSpaceWithoutResettingCurrentDraft() async {
+        let service = FakeDispatchService()
+        let controller = makeController(service)
+        let oldTask = UUID()
+        controller.state.taskID = UUID()
+        controller.state.overallPhase = .preparing
+        await controller.openNotificationWorkspace(taskID: oldTask, workspaceID: 17)
+        #expect(service.notificationSpaces == [17])
+        #expect(controller.state.overallPhase == .preparing)
+        #expect(controller.state.markdown == "Test **body**")
+        #expect(controller.state.history.isEmpty)
+        await controller.openNotificationWorkspace(taskID: controller.state.taskID!, workspaceID: 42)
+        #expect(service.notificationSpaces == [17])
+        service.handoffFails = true
+        await controller.openNotificationWorkspace(taskID: oldTask, workspaceID: 18)
+        #expect(controller.state.notice?.contains("内容已保留") == true)
+        #expect(controller.state.markdown == "Test **body**")
+        await controller.openNotificationWorkspace(taskID: oldTask, workspaceID: -1)
+        #expect(service.notificationSpaces == [17, 18])
+    }
+
+    @Test func notificationCarriesImmutableTaskAndSpaceIdentity() {
+        let taskID = UUID()
+        let content = CompletionNotifier.content(message: "即刻需要登录", title: "2 个渠道已填好，1 个待处理",
+                                                taskID: taskID, workspaceID: 17)
+        #expect(content.title == "2 个渠道已填好，1 个待处理")
+        #expect(content.userInfo[CompletionNotifier.workspaceIDKey] as? Int == 17)
+        #expect(content.userInfo[CompletionNotifier.taskIDKey] as? String == taskID.uuidString)
+        let withoutSpace = CompletionNotifier.content(message: "失败", title: "需要处理", taskID: taskID, workspaceID: nil)
+        #expect(withoutSpace.userInfo[CompletionNotifier.workspaceIDKey] == nil)
     }
 
     @Test func testSerialDispatchPreservesRequestAndMapsResults() async throws {
@@ -344,6 +397,11 @@ struct DispatchControllerTests {
 @MainActor
 private final class FakeDispatchService: DispatchServicing {
     var workspaceID: Int? { 42 }
+    var notificationSpaces: [Int] = []
+    func openWorkspace(id: Int) async throws {
+        notificationSpaces.append(id)
+        if handoffFails { throw NSError(domain: "test-notification", code: 1) }
+    }
     var handoffCount = 0
     var handoffFails = false
     func handOff() async throws {

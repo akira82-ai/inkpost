@@ -127,6 +127,8 @@ struct PasteEditor: NSViewRepresentable {
         editor.font = NSFont(name: "Avenir Next", size: 13) ?? .systemFont(ofSize: 13)
         editor.textColor = NSColor(red: 37/255, green: 41/255, blue: 35/255, alpha: 1)
         editor.drawsBackground = false
+        editor.focusRingType = .none
+        editor.insertionPointColor = editor.textColor ?? .textColor
         editor.isVerticallyResizable = true; editor.isHorizontallyResizable = false
         editor.autoresizingMask = [.width]; editor.textContainer?.widthTracksTextView = true
         editor.textContainer?.lineFragmentPadding = 0
@@ -168,14 +170,19 @@ final class ImagePasteTextView: NSTextView {
     private var pendingBodyFocus = false
     func requestBodyFocus() {
         pendingBodyFocus = true
-        DispatchQueue.main.async { [weak self] in self?.applyPendingBodyFocus() }
+        schedulePendingBodyFocus()
     }
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        applyPendingBodyFocus()
+        // AppKit is still attaching the view here; never reorder/activate its window synchronously.
+        schedulePendingBodyFocus()
+    }
+    private func schedulePendingBodyFocus() {
+        DispatchQueue.main.async { [weak self] in self?.applyPendingBodyFocus() }
     }
     private func applyPendingBodyFocus() {
         guard pendingBodyFocus, isEditable, let window else { return }
+        // Consume before entering AppKit, whose callbacks can re-enter the view lifecycle.
         pendingBodyFocus = false
         window.makeFirstResponder(self)
     }

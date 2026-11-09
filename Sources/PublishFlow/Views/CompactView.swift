@@ -5,6 +5,9 @@ import PublishKit
 struct CompactView: View {
     @Bindable var model: DispatchModel
     let controller: DispatchController
+    let presentation: TaskPresentation
+    var dismissCompact: (() -> Void)? = nil
+    var showWorkspace: (() -> Void)? = nil
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismiss) private var dismiss
     @State private var bodyFocusRequest: UUID?
@@ -17,10 +20,26 @@ struct CompactView: View {
         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.white.opacity(0.75)))
         .foregroundStyle(InkStyle.ink).preferredColorScheme(.light)
         .modifier(NoticeOverlay(model: model))
+        .modifier(TaskWindowPresentation(model: model, presentation: presentation, compact: true, dismiss: { closeCompact() }))
         .onAppear {
-            NSApp.activate(ignoringOtherApps: true)
-            bodyFocusRequest = UUID()
+            if presentation.restoreWorkspace {
+                presentation.restoreWorkspace = false
+                openWorkspace()
+                closeCompact()
+            } else {
+                presentation.compactVisible = true
+                bodyFocusRequest = UUID()
+            }
         }
+        .onDisappear { presentation.compactVisible = false }
+        .onExitCommand { closeCompact() }
+    }
+    private func closeCompact() {
+        if let dismissCompact { dismissCompact() } else { dismiss() }
+    }
+    private func openWorkspace() {
+        if let showWorkspace { showWorkspace() }
+        else { openWindow(id: "workspace"); NSApp.activate(ignoringOtherApps: true) }
     }
     private var composer: some View {
         VStack(spacing: 0) {
@@ -28,9 +47,8 @@ struct CompactView: View {
                 InkBrand()
                 Spacer()
                 QuietIcon(symbol: "arrow.up.right.square", label: "打开完整界面", size: 30) {
-                    openWindow(id: "workspace")
-                    NSApp.activate(ignoringOtherApps: true)
-                    dismiss()
+                    openWorkspace()
+                    closeCompact()
                 }
             }.padding(.top, 16).padding(.horizontal, 18).padding(.bottom, 10)
             VStack(spacing: 0) {

@@ -13,6 +13,8 @@ swift build -c "$CONFIG" --scratch-path "$SCRATCH"
 BIN_DIR="$(swift build -c "$CONFIG" --scratch-path "$SCRATCH" --show-bin-path)"
 APP=".build/Inkpost-Compact.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+swift Scripts/make-icon.swift .build/Inkpost.iconset
+iconutil -c icns .build/Inkpost.iconset -o "$APP/Contents/Resources/Inkpost.icns"
 cp "$BIN_DIR/PublishFlow" "$APP/Contents/MacOS/PublishFlow"
 cp -R "$BIN_DIR/PublishFlow_PublishKit.bundle" "$APP/Contents/Resources/"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
@@ -22,9 +24,10 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleName</key><string>Inkpost</string>
 <key>CFBundleDisplayName</key><string>墨驿 Inkpost</string>
 <key>CFBundleIdentifier</key><string>com.publishflow.app</string>
+<key>CFBundleIconFile</key><string>Inkpost.icns</string>
 <key>CFBundleExecutable</key><string>PublishFlow</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.12.2</string>
+<key>CFBundleShortVersionString</key><string>0.13.0</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSHighResolutionCapable</key><true/>

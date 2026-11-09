@@ -10,11 +10,15 @@ public final class DispatchController {
     @ObservationIgnored private let settings: DispatchSettings
     @ObservationIgnored private let assets = AssetService()
     @ObservationIgnored private let notifier = CompletionNotifier()
+    @ObservationIgnored private let onCompletion: @MainActor (DispatchCompletion) -> Void
+    @ObservationIgnored private var notificationWorkspaceID: Int?
+    @ObservationIgnored private var openingNotificationSpaces: Set<Int> = []
     @ObservationIgnored private var draftRequest: ChannelRequest?
     @ObservationIgnored private var attempts: [PlatformID: UUID] = [:]
     @ObservationIgnored private var generation = UUID()
 
-    public init(service: any DispatchServicing, settings: DispatchSettings, state: DispatchModel? = nil) {
+    public init(service: any DispatchServicing, settings: DispatchSettings, state: DispatchModel? = nil, onCompletion: @escaping @MainActor (DispatchCompletion) -> Void = { _ in }) {
+        self.onCompletion = onCompletion
         self.state = state ?? DispatchModel()
         self.service = service
         self.settings = settings
@@ -95,6 +99,21 @@ public final class DispatchController {
             } catch { state.notice = "未能打开工作区，内容已保留，请重试"; log(error.localizedDescription) }
         }
     }
+    /// Notification navigation does not archive/reset content or alter another task's state.
+    public func openNotificationWorkspace(taskID: UUID, workspaceID: Int) async {
+        guard workspaceID > 0 else { state.notice = "通知中的工作区无效"; return }
+        guard taskID != state.taskID || state.overallPhase != .preparing else {
+            state.notice = "此任务仍在填写中，请完成后再打开工作区"
+            return
+        }
+        guard openingNotificationSpaces.insert(workspaceID).inserted else { return }
+        defer { openingNotificationSpaces.remove(workspaceID) }
+        do { try await service.openWorkspace(id: workspaceID) }
+        catch {
+            state.notice = "未能打开通知对应的工作区，内容已保留，请重试"
+            log("通知工作区 \(workspaceID)：\(error.localizedDescription)")
+        }
+    }
     public func resume(_ platform: PlatformID) {
         guard state.overallPhase != .preparing, state.platformOutcomes[platform]?.canResume == true, draftRequest != nil else { return }
         state.overallPhase = .preparing
@@ -115,13 +134,16 @@ public final class DispatchController {
         state.overallPhase = state.taskPlatforms.contains { state.platformPhase[$0] == .cancelled } ? .cancelled : (state.taskPlatforms.allSatisfy { state.platformPhase[$0] == .awaitingConfirm } ? .awaitingConfirm : .failed)
         let message = state.overallPhase == .cancelled ? "已停止处理，内容已保留，请检查浏览器页面" : (state.overallPhase == .awaitingConfirm ? "全部已填好，请检查并发布" : "部分渠道需要您手工处理")
         state.notice = message
-        Task { await notifier.deliver(message) }
+        onCompletion(DispatchCompletion(taskID: state.taskID, workspaceID: notificationWorkspaceID,
+            phase: state.overallPhase, platforms: state.taskPlatforms, phases: state.platformPhase,
+            failures: state.platformOutcomes.compactMapValues(\.failure)))
     }
     // MARK: - 分发
 
     public func dispatch() {
         guard canDispatch else { return }
         state.overallPhase = .preparing
+        notificationWorkspaceID = nil
         state.errorMessage = nil
         state.eventLog = []
         state.platformOutcomes = [:]; state.platformEvents = [:]; attempts = [:]
@@ -131,11 +153,16 @@ public final class DispatchController {
         state.taskPlatforms = platforms
         generation = UUID()
         let token = generation
+        state.taskID = token
         draftRequest = ChannelRequest(title: state.title, body: state.markdown,
                                       assets: state.assetPaths)
         runningTask = Task {
             await notifier.prepare()
-            do { try await service.beginTask(id: token) } catch {
+            do {
+                try await service.beginTask(id: token)
+                guard generation == token else { return }
+                notificationWorkspaceID = service.workspaceID
+            } catch {
                 guard generation == token else { return }
                 let cancelled = error is CancellationError || Task.isCancelled
                 if !cancelled { state.errorMessage = error.localizedDescription }
@@ -175,7 +202,10 @@ public final class DispatchController {
         guard let request = draftRequest else { return }
         let execution = ChannelExecutionID(taskID: generation, platform: platform)
         attempts[platform] = execution.attemptID
-        defer { if attempts[platform] == execution.attemptID { attempts[platform] = nil } }
+        defer {
+            if generation == execution.taskID { notificationWorkspaceID = service.workspaceID }
+            if attempts[platform] == execution.attemptID { attempts[platform] = nil }
+        }
         state.currentPlatform = platform
         state.platformPhase[platform] = .preparing
         let outcome = try await service.execute(request: request, execution: execution, command: command,
@@ -235,6 +265,8 @@ public final class DispatchController {
         state.platformMessages = [:]
         state.platformOutcomes = [:]; state.platformEvents = [:]; attempts = [:]
         state.taskPlatforms = []
+        state.taskID = nil
+        notificationWorkspaceID = nil
         draftRequest = nil
         state.overallPhase = .pending
         state.errorMessage = nil

@@ -17,7 +17,6 @@ struct TaskPresentationTests {
         model.currentPlatform = .zhihu
         presentation.compactVisible = true
         #expect(presentation.claimHide(for: model))
-        #expect(!presentation.restoreWorkspace)
         presentation.compactVisible = false
         model.currentPlatform = .x
         #expect(!presentation.claimHide(for: model))
@@ -26,7 +25,6 @@ struct TaskPresentationTests {
         #expect(!presentation.claimHide(for: model))
         model.taskID = UUID()
         #expect(presentation.claimHide(for: model))
-        #expect(presentation.restoreWorkspace)
     }
 
     @Test func workspaceHidesOnceAndManualRestoreStaysVisible() async throws {
@@ -38,7 +36,7 @@ struct TaskPresentationTests {
         window.isReleasedWhenClosed = false
         defer { window.close() }
         window.contentView = NSHostingView(rootView: Text("Local presentation test")
-            .modifier(TaskWindowPresentation(model: model, presentation: presentation, compact: false)))
+            .modifier(TaskWindowPresentation(model: model, presentation: presentation, dismiss: { window.orderOut(nil) })))
         window.orderFront(nil)
         try await Task.sleep(for: .milliseconds(100))
         model.taskID = UUID()
@@ -46,7 +44,6 @@ struct TaskPresentationTests {
         model.currentPlatform = .zhihu
         try await Task.sleep(for: .milliseconds(100))
         #expect(!window.isVisible)
-        #expect(presentation.restoreWorkspace)
         window.orderFront(nil)
         model.currentPlatform = .x
         try await Task.sleep(for: .milliseconds(100))

@@ -6,9 +6,9 @@ import PublishKit
 
 /// Own the status button directly: animation never re-renders a SwiftUI label or its layout.
 @MainActor
-final class NativeMenuBar: NSObject, NSPopoverDelegate {
+final class NativeMenuBar: NSObject, NSWindowDelegate {
     let item: NSStatusItem
-    let popover = NSPopover()
+    let compactWindow: NSWindow
     private let controller: DispatchController
     private let presentation: TaskPresentation
     private let openWorkspace: () -> Void
@@ -25,7 +25,9 @@ final class NativeMenuBar: NSObject, NSPopoverDelegate {
     private(set) var frameUpdates = 0
     var isAnimating: Bool { pulseTimer != nil }
 
-    init(controller: DispatchController, presentation: TaskPresentation, openWorkspace: @escaping () -> Void) {
+    init(controller: DispatchController, presentation: TaskPresentation, openWorkspace: @escaping () -> Void, window: NSWindow? = nil) {
+        compactWindow = window ?? NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 540),
+            styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
         self.controller = controller
         self.presentation = presentation
         self.openWorkspace = openWorkspace
@@ -36,13 +38,35 @@ final class NativeMenuBar: NSObject, NSPopoverDelegate {
         button.action = #selector(toggle)
         button.imagePosition = .imageLeading
         button.font = .menuBarFont(ofSize: 0)
-        popover.behavior = .transient
-        popover.animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        popover.delegate = self
-        popover.contentViewController = NSHostingController(rootView:
-            CompactView(model: controller.state, controller: controller, presentation: presentation,
-                        dismissCompact: { [weak self] in self?.popover.performClose(nil) },
-                        showWorkspace: { [weak self] in self?.restoreWorkspace() }))
+        compactWindow.title = "墨驿"
+        compactWindow.styleMask = [.titled, .closable, .miniaturizable]
+        compactWindow.titleVisibility = .visible
+        compactWindow.titlebarAppearsTransparent = false
+        compactWindow.standardWindowButton(.closeButton)?.isHidden = false
+        compactWindow.standardWindowButton(.miniaturizeButton)?.isHidden = false
+        compactWindow.standardWindowButton(.miniaturizeButton)?.target = self
+        compactWindow.standardWindowButton(.miniaturizeButton)?.action = #selector(minimizeToBackground)
+        compactWindow.standardWindowButton(.zoomButton)?.isHidden = false
+        compactWindow.standardWindowButton(.zoomButton)?.isEnabled = false
+        compactWindow.collectionBehavior = [.fullScreenNone]
+        compactWindow.isReleasedWhenClosed = false
+        compactWindow.level = .normal
+        compactWindow.hidesOnDeactivate = false
+        compactWindow.delegate = self
+        let accessory = NSTitlebarAccessoryViewController()
+        let gear = NSButton(image: NSImage(systemSymbolName: "gearshape", accessibilityDescription: "设置")!,
+                            target: self, action: #selector(openSettings))
+        gear.isBordered = false
+        gear.toolTip = "设置"
+        gear.frame = NSRect(x: 0, y: 0, width: 36, height: 28)
+        accessory.view = gear
+        accessory.layoutAttribute = .right
+        compactWindow.addTitlebarAccessoryViewController(accessory)
+        if window == nil {
+            compactWindow.contentViewController = NSHostingController(rootView:
+                CompactView(model: controller.state, controller: controller, presentation: presentation,
+                            dismissCompact: { [weak self] in self?.hideCompact() }))
+        }
         accessibilityObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -85,7 +109,6 @@ final class NativeMenuBar: NSObject, NSPopoverDelegate {
         frame = 0
         guard let button = item.button else { return }
         let reduced = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        popover.animates = !reduced
         frames = (0..<26).map { index in
             let alpha = 0.65 + 0.35 * cos(Double(index) / 26 * 2 * .pi)
             return Self.image(running: lastRunning, attention: lastAttention,
@@ -168,22 +191,50 @@ final class NativeMenuBar: NSObject, NSPopoverDelegate {
     }
 
     @objc private func toggle() {
-        if presentation.restoreWorkspace { restoreWorkspace(); return }
-        if popover.isShown { popover.performClose(nil); return }
-        guard let button = item.button else { return }
+        if compactWindow.isVisible { hideCompact(); return }
+        guard let button = item.button, let anchorWindow = button.window else { return }
+        let anchor = anchorWindow.convertToScreen(button.convert(button.bounds, to: nil))
+        let screen = anchorWindow.screen ?? NSScreen.main
+        let visible = screen?.visibleFrame ?? anchor
+        compactWindow.contentView?.layoutSubtreeIfNeeded()
+        let fitting = compactWindow.contentView?.fittingSize ?? NSSize(width: 420, height: 540)
+        let width = min(420, visible.width - 24)
+        let titleHeight = compactWindow.frame.height - compactWindow.contentLayoutRect.height
+        let height = min(max(1, fitting.height) + titleHeight, visible.height - 16)
+        let x = min(max(anchor.midX - width / 2, visible.minX + 8), visible.maxX - width - 8)
+        let y = max(visible.minY + 8, min(anchor.minY - 8, visible.maxY) - height)
+        compactWindow.setFrame(NSRect(x: x, y: y, width: width, height: height), display: true)
         presentation.compactVisible = true
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        // Target only the popover; activating the app here can raise the workspace as well.
-        popover.contentViewController?.view.window?.makeKey()
+        NSApp.activate(ignoringOtherApps: true)
+        compactWindow.makeKeyAndOrderFront(nil)
+        presentation.compactFocusRequest = UUID()
     }
 
-    private func restoreWorkspace() {
-        presentation.restoreWorkspace = false
-        popover.performClose(nil)
-        openWorkspace()
+    private func hideCompact() {
+        compactWindow.orderOut(nil)
+        presentation.compactVisible = false
     }
 
-    func popoverDidClose(_ notification: Notification) { presentation.compactVisible = false }
+    func showMainWindow() {
+        if !compactWindow.isVisible { toggle() }
+        else {
+            NSApp.activate(ignoringOtherApps: true)
+            compactWindow.makeKeyAndOrderFront(nil)
+            presentation.compactFocusRequest = UUID()
+        }
+    }
+
+    @objc private func openSettings() { openWorkspace() }
+    @objc private func minimizeToBackground() { hideCompact() }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        hideCompact()
+        return false
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        if notification.object as? NSWindow === compactWindow { presentation.compactVisible = false }
+    }
 
     func stop() {
         observing = false
@@ -194,23 +245,24 @@ final class NativeMenuBar: NSObject, NSPopoverDelegate {
         }
         accessibilityObserver = nil
         appearanceObservation = nil
-        popover.performClose(nil)
+        compactWindow.delegate = nil
+        compactWindow.close()
         NSStatusBar.system.removeStatusItem(item)
     }
 }
 
-/// Install once from a scene, preserving SwiftUI's openWindow action for the native popover.
+/// Install on the sole SwiftUI main window; settings never bootstrap another editor.
 struct MenuBarInstallation: View {
     let lifecycle: AppLifecycle
     let controller: DispatchController
     let presentation: TaskPresentation
-    @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
     var body: some View {
-        Color.clear.frame(width: 0, height: 0).onAppear {
-            lifecycle.installMenuBar(controller: controller, presentation: presentation) {
-                openWindow(id: "workspace")
+        WindowReader { window in
+            lifecycle.installMenuBar(controller: controller, presentation: presentation, window: window) {
+                openSettings()
                 NSApp.activate(ignoringOtherApps: true)
             }
-        }
+        }.frame(width: 0, height: 0)
     }
 }

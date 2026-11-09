@@ -31,9 +31,14 @@
   3. Bottom: design specifications and workflow explanations for developer reference.
 - Keep explanatory and developer-reference sections outside the simulated product UI. Keep all three sections consistent when updating the prototype.
 
-## Compact mode implementation
+## Main window implementation
 
-- The native NSStatusItem/NSPopover compact interface and the full workspace share one DispatchController/DispatchModel. NativeMenuBar owns menu-bar copy and fixed-size image-frame animation; animation ticks must not write title or item length. AppKit editor, picker, previews and lifecycle presentation remain in Views.
+- Inkpost has one ordinary NSWindow at normal level using the former compact layout. No compact/full publishing mode or second editor. The former workspace is Settings only; do not add configuration capabilities during this migration.
+- Use the native titlebar with title 墨驿, visible standard close/minimize buttons and a disabled gray zoom button; no resizing or fullscreen. Close and minimize both hide the main window without quitting, cancelling, or minimizing to Dock. The right gear opens Settings.
+- Menu bar toggles the same main window; Dock reopen and Command-0 restore it. Explicit opening activates once and focuses the body. Switching apps leaves it visible behind other apps, without raising Settings.
+- Hide automatically once only after valid Start Filling begins execution. Progress, completion, failure, cancellation, login waiting, focus loss and Escape must not change visibility.
+- Main window and Settings share one DispatchController/DispatchModel. Task operations, recovery, errors and logs belong in the main window. NativeMenuBar owns status copy and fixed-size image animation; animation ticks never write title or item length. Window lifecycle remains in Views.
+
 - Product workflow ends at awaitingConfirm (已填好); no product UI for published or receipt tracking. On successful workspace handoff, archive the content, images and Space identity in session history, then reset the editor while retaining channel selection. Failed handoffs and incomplete tasks must retain content. Internal fixture CLI may retain receipt checks.
 - PNG encoding belongs exclusively to AssetService during task preparation, before any adapter/browser execution. DispatchService retains one complete prepared batch per task and passes its source-to-PNG mapping through ChannelExecutionContext while preserving the original ChannelRequest. Adapters upload only those PNG files; adapter-side or clipboard-side format conversion, repair, and fallback to originals are forbidden. Resume reuses the same batch; release it only after no invocation can use it. Reject unsupported animated/multiframe assets explicitly, never silently flatten them.
 - Assets use AssetService for validation and byte-based SHA-256 deduplication. The editor's current six-image selection limit is a product-level constraint, independent of each channel's supported image count. Pass every selected image to each selected adapter; the adapter reports any channel-specific excess rather than silently selecting a subset. Temporary assets are not durable drafts.

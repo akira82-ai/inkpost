@@ -3,18 +3,17 @@ import SwiftUI
 import Observation
 import PublishKit
 
-/// Presentation identity is shared by the two windows; task state stays in DispatchModel.
+/// Main-window presentation only; task state stays in DispatchModel.
 @MainActor @Observable
 final class TaskPresentation {
     var compactVisible = false
-    var restoreWorkspace = false
+    var compactFocusRequest: UUID?
     private var hiddenTask: UUID?
 
     func claimHide(for model: DispatchModel) -> Bool {
         guard model.overallPhase == .preparing, model.currentPlatform != nil,
               let id = model.taskID, hiddenTask != id else { return false }
         hiddenTask = id
-        restoreWorkspace = !compactVisible
         return true
     }
 }
@@ -22,21 +21,17 @@ final class TaskPresentation {
 struct TaskWindowPresentation: ViewModifier {
     let model: DispatchModel
     let presentation: TaskPresentation
-    let compact: Bool
-    var dismiss: () -> Void = {}
-    @State private var window: NSWindow?
+    var dismiss: () -> Void
 
     func body(content: Content) -> some View {
-        content.background(WindowReader { window = $0 })
-            .onChange(of: model.currentPlatform) { _, _ in
-                guard compact == presentation.compactVisible,
-                      presentation.claimHide(for: model) else { return }
-                if compact { dismiss() } else { window?.orderOut(nil) }
-            }
+        content.onChange(of: model.currentPlatform) { _, _ in
+            guard presentation.claimHide(for: model) else { return }
+            dismiss()
+        }
     }
 }
 
-private struct WindowReader: NSViewRepresentable {
+struct WindowReader: NSViewRepresentable {
     let receive: (NSWindow) -> Void
     func makeNSView(context: Context) -> Reader { Reader(receive: receive) }
     func updateNSView(_ view: Reader, context: Context) { view.receive = receive }

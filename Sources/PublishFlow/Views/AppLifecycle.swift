@@ -8,14 +8,16 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, UNUserNotificationCen
     private var pendingNotificationRoutes: [(UUID?, Int?)] = []
     private var showWorkspace: (() -> Void)?
     private var menuBar: NativeMenuBar?
-    func installMenuBar(controller: DispatchController, presentation: TaskPresentation, openWorkspace: @escaping () -> Void) {
+    func installMenuBar(controller: DispatchController, presentation: TaskPresentation, window: NSWindow, openWorkspace: @escaping () -> Void) {
         guard menuBar == nil else { return }
         self.controller = controller
-        self.showWorkspace = openWorkspace
+        self.showWorkspace = { [weak self] in self?.menuBar?.showMainWindow() }
         let pending = pendingNotificationRoutes
         pendingNotificationRoutes = []
         Task { for (taskID, workspaceID) in pending { await self.openNotification(taskID: taskID, workspaceID: workspaceID) } }
-        menuBar = NativeMenuBar(controller: controller, presentation: presentation, openWorkspace: openWorkspace)
+        menuBar = NativeMenuBar(controller: controller, presentation: presentation, openWorkspace: openWorkspace, window: window)
+        presentation.compactVisible = true
+        presentation.compactFocusRequest = UUID()
     }
     func applicationWillTerminate(_ notification: Notification) { menuBar?.stop() }
     func applicationWillFinishLaunching(_ notification: Notification) {
@@ -24,6 +26,11 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, UNUserNotificationCen
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+    }
+    func showMainWindow() { menuBar?.showMainWindow() }
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showMainWindow()
+        return false
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {

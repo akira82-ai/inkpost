@@ -4,6 +4,33 @@
 
 ## 代码组织
 
+### 在线更新（#49，2026-11-10）
+
+- 精确依赖 Sparkle 2.10.1，SPM 锁定 revision 和官方二进制校验。`UpdateModel` 存展示状态，`UpdateController` 适配官方 `SPUUserDriver`/`SPUUpdaterDelegate`，SwiftUI 视图呈现更新面板与设置；框架负责调度、下载、版本判断、验证和独立安装重启。不另建下载器、安装进程或轮询检查计时器。
+- `Scripts/update-config.plist` 为唯一更新配置来源，打包合并到 Info.plist。生产代码要求 HTTPS 与 32 字节 Ed25519 公钥，清单和归档都必须签名；清单验证失败不降级，归档在解压前验证。远端说明按不可执行纯文本显示，不加载远端 HTML/JavaScript。
+- 更新源为 `https://github.com/akira82-ai/inkpost/releases/latest/download/appcast.xml`。清单内更新包指向具体 `v版本` Release，不能把 latest 链接当归档地址。0.17.0 起 Release 配套发布签名清单与更新包。首个包含更新器的版本须先手工安装，历史无更新器版本无法自行启动这条升级链路。
+- 签名私钥保存在 macOS 登录钥匙串，专用账户 `com.publishflow.app.sparkle`；源码仅保存公钥。必须安全备份私钥并限制发布签名权限；不要提交、打印或向日志导出私钥。当前代码签名为 Inkpost 自签名（SHA-1 `4E15EF1D792EBC692CD2DE06AFC4F242B35D5A99`），未做 Developer ID 公证；用于公开分发前仍须配置相应身份与公证流程，不能把本地验签等同于 Gatekeeper 公证通过。
+- `make-app.sh` 在签名之前嵌入框架，保留 symlink；辅助应用、Autoupdate、XPC、框架、主应用按由内向外正式签名，最后 strict/deep 验证。`INKPOST_APP_VERSION`/`INKPOST_BUILD_VERSION` 可指定版本；后者决定 Sparkle 的版本排序，必须比已发布版本增大。`INKPOST_PACK_ONLY=1` 只生成新路径，不停止或替换当前应用。
+- 本地准备示例（路径和版本替换为本次实际发布值；只生成文件，不上传）：
+
+```sh
+INKPOST_SIGNING_IDENTITY=正式身份 INKPOST_BUILD_PATH=.build/compact \
+  INKPOST_PACK_ONLY=1 INKPOST_APP_OUTPUT=.build/Inkpost-Release.app \
+  INKPOST_APP_VERSION=新版本 INKPOST_BUILD_VERSION=新构建号 \
+  Scripts/make-app.sh release
+Scripts/prepare-update.sh .build/Inkpost-Release.app /新的产物目录 /更新说明.txt
+```
+
+- 准备脚本校验应用签名、公钥与钥匙串匹配，生成仅含 `.app` 的 ZIP、嵌入说明的签名 appcast.xml 及 SHA256SUMS.txt；实际 CPU 架构写入归档名。正式 Release 需一起上传该清单和匹配归档，资产名不得更改，不得修改已签名清单或 ZIP；变更后重新生成并签名。必须先确认对应版本的发布，不能把本地验收包直接上传冒充正式版本。
+- 单元及回归：113 项既有基线通过，新增 7 项更新专项通过，完整 120 tests / 22 suites 通过（128.095 秒）。覆盖在途任务／所有内存内容阻止重启、下载后新增稿件再次保护、取消仅调用一次、收起不取消、不将下载当安装成功、无新版与失败分离、安装等待时退出保护及原生视图尺寸。
+- 真实隔离升级可重跑：`INKPOST_SIGNING_IDENTITY=正式身份 INKPOST_BUILD_PATH=.build/issue49 Scripts/test-update.sh`。需登录钥匙串内已有专用签名密钥；只在本机随机端口开 HTTP，生产代码不允许此例外。使用生产 UI 适配器和生产单实例锁，创建唯一测试 bundle ID/锁目录，不操作真实墨驿或发布外部内容。旧版 1.0 退出后新版 2.0 取得同一锁；篡改归档和篡改清单均被框架拒绝，旧包版本与签名保留。三种场景已通过，记录 `/tmp/inkpost49-repeatable-integration.log`，产物 `/tmp/inkpost-update-test.t7x2s2`。
+- 测试 fixture 仅验证隔离应用的辅助进程安装链路；不能替代 GitHub Release 实际分发、全新机器 Gatekeeper、公证或所有磁盘权限失败场景验收。
+- 最终复核：新增后台检查不弹面板、发现后等待显式下载的隔离验收也通过；三场景重跑日志 `/tmp/inkpost49-repeatable-final.log`，证据目录 `/tmp/inkpost-update-test.sOaCMr`。最后的 Escape 操作调整后，7 项更新专项复测通过。release 构建、正式签名 strict/deep 验证、本地生成签名清单与归档、脚本语法及差异检查通过。
+- 标题栏还原修正：齿轮和更新提示由同一个右侧附件承载，齿轮保持原右边距，绿色圆点／细边框提示只向左展开，下载显示百分比；没有提示时附件恢复为原齿轮宽度。16 项更新与窗口专项通过，原生坐标测试覆盖提示出现、下载进度、准备完成和消失，不移动齿轮，设置点击保持原行为。一次并行进行 CUA 操作干扰了窗口前后排序断言，停止界面操作后独立重跑通过，日志 `/tmp/inkpost49-titlebar-final2.log`。正式签名 release 构建验签及替换启动通过，CUA 确认无提示时齿轮位于右侧且无额外占位；有更新各阶段由原生窗口回归测试覆盖。旧包保存在 `.build/inkpost-previous.Z0zCYM/Inkpost-Compact.app`。
+- 已启动正式签名的新构建 `.build/Inkpost-Compact.app`（检查时 PID 93964），旧包保存在 `.build/inkpost-previous.OgqjIB/Inkpost-Compact.app`。CUA 确认设置展示当前版本、自动检查开关和手动检查入口，未发布源的实际检查显示失败，可按 Escape 收起并返回正文；未改用户内容。原型已同步显式重启步骤，ego Lite 验证下载／校验后停在准备就绪，再点击才模拟新版，不自动显示成功。上述为 0.16.0 实现阶段的验证记录。
+
+- 0.17.0 交付复核：最终全量串行 121 tests / 22 suites 通过（129.331 秒）；隔离真实升级三场景通过（正常安装重启及单实例、篡改归档拒绝、篡改清单拒绝），日志 `/tmp/inkpost-0170-integration.log`。正式签名 release 构建、嵌套框架验签及启动、compact-smoke、脚本/plist/原型语法与差异检查通过；生成签名 appcast.xml 和匹配归档，DMG 完整性、ZIP 解压验签、0.17.0 版本与 SHA256 校验通过。首次含更新器的正式版本仍需手工安装。
+
 - 采用 SwiftUI 适配的 MVC、独立服务与渠道适配器；沿用 macOS 14+、Swift Package Manager 技术栈，优先复用现有实现。
 - `Sources/PublishFlow/PublishFlowApp.swift` 是依赖组装与 Scene 入口。
 - `Sources/PublishFlow/Views/` 管理 UI、展示文案和窗口生命周期；观察模型并向控制器发送动作，不直接调用浏览器或存储。

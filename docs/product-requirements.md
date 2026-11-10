@@ -10,6 +10,18 @@
 
 ## 内容、执行与数据要求
 
+### 在线更新（#49）
+
+- 默认每天自动检查一次，仅显示标题栏轻量提醒，不主动下载或激活窗口。设置提供自动检查开关、当前版本及手动检查入口。
+- 标题栏齿轮保持原位置，更新提示在其左侧，按原型使用绿色圆点、文字和细边框圆角；下载中显示百分比。提示出现、文字变化和消失均不移动齿轮，无提示时不保留额外占位。
+- 用户查看版本说明后点击「下载并更新」才下载；展示真实下载与准备进度，下载可取消，收起面板不取消下载。
+- 校验与准备完成后等待「重启并使用新版」。由独立辅助进程在旧进程退出后安装并启动新版；不能把下载完成显示为更新成功。
+- 正在填写、待登录、交还浏览器、未交接结果或非空标题／正文／图片均阻止更新启动与安装重启。下载后新增内容也必须阻止重启；安装等待期间的退出同样受保护，不清空稿件或配置。
+- 使用签名更新清单和签名更新包，验证通过才进入安装。检查、下载或验证失败须明确反馈，不伪报成功；版本比较、辅助安装及重启复用 Sparkle。
+- 本地实现与隔离升级验收已完成；正式线上入口须发布含匹配 appcast.xml、签名 ZIP 的 Release 后生效。当前 Inkpost 签名为本地自签名，尚不具备 Apple Developer ID 公证分发资质。
+
+### 发布与素材
+
 - Product content is plain text, supporting line breaks and emoji. Preserve whitespace and characters exactly. Do not render Markdown, generate HTML, use rich-text formatting, or add content processing features. Local fixtures use plain-text controls as well.
 
 - Inkpost is a menu-bar macOS application with no Dock icon. Clicking the menu-bar icon shows and activates the same publishing window on the user's current desktop without switching desktops. The publishing window uses normal window ordering: bring it forward on explicit invocation, then let other apps cover it normally. Do not use permanent floating levels or repeated activation to keep it in front.

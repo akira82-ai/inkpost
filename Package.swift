@@ -4,6 +4,9 @@ import PackageDescription
 let package = Package(
     name: "PublishFlow",
     platforms: [.macOS(.v14)],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.1")
+    ],
     targets: [
         // 核心库：协议模型、本地存储、EgoLite 引擎
         .target(
@@ -17,7 +20,9 @@ let package = Package(
         // SwiftUI App
         .executableTarget(
             name: "PublishFlow",
-            dependencies: ["PublishKit"]
+            dependencies: ["PublishKit", .product(name: "Sparkle", package: "Sparkle")],
+            resources: [.copy("Sparkle-LICENSE.txt")],
+            linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
         ),
         // CLI 冒烟/演示工具
         .executableTarget(

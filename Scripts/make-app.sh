@@ -11,7 +11,10 @@ if [[ "$INKPOST_SIGNING_IDENTITY" == "-" ]]; then
 fi
 swift build -c "$CONFIG" --scratch-path "$SCRATCH"
 BIN_DIR="$(swift build -c "$CONFIG" --scratch-path "$SCRATCH" --show-bin-path)"
-APP=".build/Inkpost-Compact.app"
+APP="${INKPOST_APP_OUTPUT:-.build/Inkpost-Compact.app}"
+VERSION="${INKPOST_APP_VERSION:-0.17.0}"
+BUILD_VERSION="${INKPOST_BUILD_VERSION:-$VERSION}"
+[[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ && "$BUILD_VERSION" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] || { echo "Invalid app/build version" >&2; exit 1; }
 # Do not overwrite the running executable/resources before the replacement has passed signing.
 STAGING_ROOT="$(mktemp -d .build/inkpost-stage.XXXXXX)"
 STAGED_APP="$STAGING_ROOT/Inkpost-Compact.app"
@@ -30,15 +33,37 @@ cat > "$STAGED_APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIconFile</key><string>Inkpost.icns</string>
 <key>CFBundleExecutable</key><string>PublishFlow</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.16.0</string>
+<key>CFBundleShortVersionString</key><string>0.17.0</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 <key>LSUIElement</key><true/>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PLIST
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$STAGED_APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $BUILD_VERSION" "$STAGED_APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Merge Scripts/update-config.plist" "$STAGED_APP/Contents/Info.plist"
+FRAMEWORK="$SCRATCH/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
+[[ -d "$FRAMEWORK" ]] || { echo "Sparkle framework is missing" >&2; exit 1; }
+mkdir -p "$STAGED_APP/Contents/Frameworks"
+ditto "$FRAMEWORK" "$STAGED_APP/Contents/Frameworks/Sparkle.framework"
+cp Sources/PublishFlow/Sparkle-LICENSE.txt "$STAGED_APP/Contents/Resources/"
+# Re-sign nested code inside-out using the configured identity; preserve helper entitlements.
+FRAMEWORK_COPY="$STAGED_APP/Contents/Frameworks/Sparkle.framework"
+while IFS= read -r -d '' nested; do
+  codesign --force --sign "$INKPOST_SIGNING_IDENTITY" --preserve-metadata=entitlements "$nested"
+done < <(find "$FRAMEWORK_COPY/Versions/B" -depth \( -name '*.xpc' -o -name '*.app' -o -name Autoupdate \) -print0)
+codesign --force --sign "$INKPOST_SIGNING_IDENTITY" "$FRAMEWORK_COPY"
 codesign --force --sign "$INKPOST_SIGNING_IDENTITY" "$STAGED_APP"
 codesign --verify --deep --strict "$STAGED_APP"
+# Pack-only mode never stops or replaces a running app (used for release preparation/tests).
+if [[ "${INKPOST_PACK_ONLY:-0}" == "1" ]]; then
+  [[ ! -e "$APP" ]] || { echo "Output already exists: $APP" >&2; exit 1; }
+  mv "$STAGED_APP" "$APP"
+  rmdir "$STAGING_ROOT"
+  echo "Signed app prepared at $APP"
+  exit 0
+fi
 # Quit all identified app copies gracefully, then the lock owner (including direct binaries).
 # Do not continue after a refusal/timeout or kill unrelated executables by name.
 swift Scripts/stop-app.swift

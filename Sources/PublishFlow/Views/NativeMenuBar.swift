@@ -25,7 +25,7 @@ final class NativeMenuBar: NSObject, NSWindowDelegate {
     private(set) var frameUpdates = 0
     var isAnimating: Bool { pulseTimer != nil }
 
-    init(controller: DispatchController, presentation: TaskPresentation, openSettings: @escaping () -> Void, window: NSWindow) {
+    init(controller: DispatchController, presentation: TaskPresentation, openSettings: @escaping () -> Void, window: NSWindow, updates: UpdateController? = nil) {
         mainWindow = window
         self.controller = controller
         self.presentation = presentation
@@ -60,8 +60,7 @@ final class NativeMenuBar: NSObject, NSWindowDelegate {
                             target: self, action: #selector(openSettingsWindow))
         gear.isBordered = false
         gear.toolTip = "设置"
-        gear.frame = NSRect(x: 0, y: 0, width: 36, height: 28)
-        accessory.view = gear
+        accessory.view = UpdateTitlebarControls(gear: gear, updates: updates)
         accessory.layoutAttribute = .right
         mainWindow.addTitlebarAccessoryViewController(accessory)
         accessibilityObserver = NSWorkspace.shared.notificationCenter.addObserver(
@@ -245,10 +244,11 @@ struct MenuBarInstallation: View {
     let lifecycle: AppLifecycle
     let controller: DispatchController
     let presentation: TaskPresentation
+    var updates: UpdateController? = nil
     @Environment(\.openSettings) private var openSettings
     var body: some View {
         WindowReader { window in
-            lifecycle.installMenuBar(controller: controller, presentation: presentation, window: window) {
+            lifecycle.installMenuBar(controller: controller, presentation: presentation, window: window, updates: updates) {
                 openSettings()
                 NSApp.activate(ignoringOtherApps: true)
             }

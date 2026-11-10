@@ -1,10 +1,11 @@
 import SwiftUI
 import PublishKit
 
-/// Settings contains capability information only; editing and task actions live in the main window.
+/// Settings contains channel capabilities and software updates; editing stays in the main window.
 struct ContentView: View {
     let model: DispatchModel
     let controller: DispatchController
+    var updates: UpdateController? = nil
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("设置").font(.custom("Songti SC", size: 26))
@@ -19,7 +20,7 @@ struct ContentView: View {
                     Text("已接入").foregroundStyle(InkStyle.muted)
                 }.font(InkStyle.font(12)).padding(.vertical, 6)
             }
-            Text("当前版本暂无其他可配置项。").font(InkStyle.font(11)).foregroundStyle(InkStyle.muted)
+            if let updates { SoftwareUpdateSettings(controller: updates, model: updates.state) }
         }.padding(28).frame(width: 460)
             .background(InkStyle.paper).foregroundStyle(InkStyle.ink).preferredColorScheme(.light)
     }

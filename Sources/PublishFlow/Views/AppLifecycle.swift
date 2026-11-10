@@ -7,13 +7,24 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, UNUserNotificationCen
     private var controller: DispatchController?
     private var pendingNotificationRoutes: [(UUID?, Int?)] = []
     private var menuBar: NativeMenuBar?
-    func installMenuBar(controller: DispatchController, presentation: TaskPresentation, window: NSWindow, openSettings: @escaping () -> Void) {
+    private var updates: UpdateController?
+    func configureUpdates(_ updates: UpdateController) { self.updates = updates }
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if let updates, updates.state.installSessionActive, let reason = updates.blockingReason {
+            updates.state.message = reason
+            updates.state.isPresented = true
+            showMainWindow()
+            return .terminateCancel
+        }
+        return .terminateNow
+    }
+    func installMenuBar(controller: DispatchController, presentation: TaskPresentation, window: NSWindow, updates: UpdateController? = nil, openSettings: @escaping () -> Void) {
         guard menuBar == nil else { return }
         self.controller = controller
         let pending = pendingNotificationRoutes
         pendingNotificationRoutes = []
         Task { for (taskID, workspaceID) in pending { await self.openNotification(taskID: taskID, workspaceID: workspaceID) } }
-        menuBar = NativeMenuBar(controller: controller, presentation: presentation, openSettings: openSettings, window: window)
+        menuBar = NativeMenuBar(controller: controller, presentation: presentation, openSettings: openSettings, window: window, updates: updates)
         showMainWindow()
         ApplicationStartup.instance?.whenReady(activate: { [weak self] in
             guard let self, let menuBar = self.menuBar else { return false }

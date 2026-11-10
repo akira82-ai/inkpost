@@ -202,7 +202,8 @@ struct NativeMenuBarTests {
         #expect(!bar.mainWindow.isVisible)
         #expect(!bar.mainWindow.isMiniaturized)
         bar.showMainWindow()
-        let gear = try #require(bar.mainWindow.titlebarAccessoryViewControllers.first?.view as? NSButton)
+        let controls = try #require(bar.mainWindow.titlebarAccessoryViewControllers.first?.view as? UpdateTitlebarControls)
+        let gear = controls.gear
         gear.performClick(nil)
         #expect(settingsOpens == 1)
         #expect(bar.mainWindow.isVisible)

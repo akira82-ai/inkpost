@@ -76,8 +76,12 @@ public final class DispatchController {
         state.assetData[path] = nil
     }
     public func moveAsset(_ path: String, before target: String) {
-        guard state.overallPhase == .pending, let from = state.assetPaths.firstIndex(of: path), let to = state.assetPaths.firstIndex(of: target) else { return }
-        state.assetPaths.remove(at: from); state.assetPaths.insert(path, at: to)
+        guard state.overallPhase == .pending, path != target,
+              let from = state.assetPaths.firstIndex(of: path),
+              let to = state.assetPaths.firstIndex(of: target) else { return }
+        state.assetPaths.remove(at: from)
+        // Removing an earlier source shifts the target one slot to the left.
+        state.assetPaths.insert(path, at: from < to ? to - 1 : to)
     }
     public func openWorkspace() {
         guard state.overallPhase != .preparing, !state.isHandingOff else { return }

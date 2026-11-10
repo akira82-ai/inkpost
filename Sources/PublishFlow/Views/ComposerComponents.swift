@@ -199,20 +199,21 @@ struct AttachmentStrip: View {
     var body: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 6), spacing: 0) {
             ForEach(model.assetPaths, id: \.self) { path in
-                AttachmentTile(data: model.assetData[path], name: URL(fileURLWithPath: path).lastPathComponent,
+                AttachmentTile(path: path, data: model.assetData[path],
                     editable: editable, dragging: dragging == path,
+                    dragStarted: { dragging = path; dropTarget = nil }, dragEnded: clearDrag,
+                    accepts: { model.overallPhase == .pending && model.assetPaths.contains($0) && model.assetPaths.contains(path) },
+                    targeted: { value in
+                        if value { dropTarget = path }
+                        else if dropTarget == path { dropTarget = nil }
+                    },
+                    dropped: { source in controller.moveAsset(source, before: path); clearDrag() },
                     open: { preview = path }, remove: { controller.removeAsset(path) })
-                    .overlay {
+                    .overlay(alignment: .leading) {
                         if dropTarget == path {
-                            RoundedRectangle(cornerRadius: 8).stroke(Color(hex: 0x8A9779), lineWidth: 2).padding(-3).allowsHitTesting(false)
+                            Capsule().fill(Color(hex: 0x8A9779)).frame(width: 2).offset(x: -5).allowsHitTesting(false)
                         }
                     }
-                    .onDrag {
-                        guard editable else { return NSItemProvider() }
-                        dragging = path
-                        return NSItemProvider(object: path as NSString)
-                    }
-                    .onDrop(of: [.text], delegate: ImageOrderDrop(target: path, dragging: $dragging, dropTarget: $dropTarget, editable: editable, move: controller.moveAsset))
             }
             if model.assetPaths.count < 6 {
                 Button(action: chooseImages) {
@@ -224,7 +225,11 @@ struct AttachmentStrip: View {
                 }.buttonStyle(.plain).disabled(!editable).help("图片选填，最多 6 张").accessibilityLabel("添加图片")
             }
         }.padding(.vertical, 7)
-        .onHover { _ in if NSEvent.pressedMouseButtons == 0 { dragging = nil; dropTarget = nil } }
+        .onChange(of: editable) { _, value in if !value { clearDrag() } }
+        .onChange(of: model.assetPaths) { _, paths in
+            if let dragging, !paths.contains(dragging) { clearDrag() }
+        }
+        .onDisappear(perform: clearDrag)
         .sheet(item: Binding(get: { preview.map(PreviewAsset.init) }, set: { preview = $0?.path })) { item in
             ZStack(alignment: .topTrailing) {
                 Color(hex: 0x20271F)
@@ -235,6 +240,7 @@ struct AttachmentStrip: View {
             }.frame(minWidth: 560, minHeight: 420).onExitCommand { preview = nil }
         }
     }
+    private func clearDrag() { dragging = nil; dropTarget = nil }
     private func chooseImages() {
         let panel = NSOpenPanel(); panel.allowedContentTypes = [.image]; panel.allowsMultipleSelection = true
         panel.begin { response in if response == .OK { controller.addAssets(panel.urls.map(\.path)) } }
@@ -243,10 +249,16 @@ struct AttachmentStrip: View {
 private struct PreviewAsset: Identifiable { let path: String; var id: String { path } }
 
 private struct AttachmentTile: View {
+    let path: String
     let data: Data?
-    let name: String
+    private var name: String { URL(fileURLWithPath: path).lastPathComponent }
     let editable: Bool
     let dragging: Bool
+    let dragStarted: () -> Void
+    let dragEnded: () -> Void
+    let accepts: (String) -> Bool
+    let targeted: (Bool) -> Void
+    let dropped: (String) -> Void
     let open: () -> Void
     let remove: () -> Void
     @State private var hovered = false
@@ -262,6 +274,13 @@ private struct AttachmentTile: View {
                 }.background(Color(hex: 0xEEEEE7)).clipShape(RoundedRectangle(cornerRadius: 8))
                     .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(InkStyle.ink.opacity(0.07)))
             }.buttonStyle(.plain).focused($focused).accessibilityLabel("预览图片 \(name)")
+                .overlay {
+                    AttachmentDragSource(path: path, data: data, editable: editable,
+                        started: dragStarted, ended: dragEnded, clicked: { focused = true; open() },
+                        removed: remove, hovered: { hovered = $0 },
+                        accepts: accepts, targeted: targeted, dropped: dropped)
+                        .accessibilityHidden(true)
+                }
             if editable {
                 Button(action: remove) {
                     Image(systemName: "xmark").font(.system(size: 9))
@@ -275,22 +294,6 @@ private struct AttachmentTile: View {
         }.aspectRatio(1, contentMode: .fit)
             .opacity(dragging ? 0.35 : 1).scaleEffect(dragging ? 0.94 : 1)
             .onHover { hovered = $0 }
-    }
-}
-
-private struct ImageOrderDrop: DropDelegate {
-    let target: String
-    @Binding var dragging: String?
-    @Binding var dropTarget: String?
-    let editable: Bool
-    let move: (String, String) -> Void
-    func validateDrop(info: DropInfo) -> Bool { editable && dragging != nil }
-    func dropEntered(info: DropInfo) { if editable && dragging != nil { dropTarget = target } }
-    func dropExited(info: DropInfo) { if dropTarget == target { dropTarget = nil } }
-    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
-    func performDrop(info: DropInfo) -> Bool {
-        guard editable, let source = dragging else { return false }
-        move(source, target); dragging = nil; dropTarget = nil; return true
     }
 }
 

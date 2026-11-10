@@ -21,6 +21,62 @@ struct DispatchControllerTests {
         #expect(controller.state.overallPhase != .preparing, "Dispatch timed out")
     }
 
+    @Test(arguments: [
+        ("A", "C", ["B", "A", "C"]),
+        ("C", "A", ["C", "A", "B"]),
+        ("A", "B", ["A", "B", "C"]),
+        ("B", "A", ["B", "A", "C"]),
+        ("B", "C", ["A", "B", "C"]),
+        ("C", "B", ["A", "C", "B"]),
+        ("A", "A", ["A", "B", "C"]),
+        ("B", "B", ["A", "B", "C"]),
+        ("C", "C", ["A", "B", "C"])
+    ])
+    func imageDropInsertsBeforeTarget(source: String, target: String, expected: [String]) {
+        let controller = makeController(FakeDispatchService())
+        controller.state.assetPaths = ["A", "B", "C"]
+        let previews = ["A": Data([1]), "B": Data([2]), "C": Data([3])]
+        controller.state.assetData = previews
+        controller.moveAsset(source, before: target)
+        #expect(controller.state.assetPaths == expected)
+        #expect(controller.state.assetData == previews)
+    }
+
+    @Test func invalidOrDisabledImageDropsPreserveDraft() {
+        let controller = makeController(FakeDispatchService())
+        let paths = ["A", "B", "C"]
+        controller.state.assetPaths = paths
+        controller.moveAsset("missing", before: "A")
+        controller.moveAsset("A", before: "missing")
+        #expect(controller.state.assetPaths == paths)
+        for phase in [TargetPhase.preparing, .awaitingConfirm, .failed, .cancelled] {
+            controller.state.overallPhase = phase
+            controller.moveAsset("C", before: "A")
+            #expect(controller.state.assetPaths == paths)
+        }
+        #expect(controller.state.title == "Test title")
+        #expect(controller.state.markdown == "Test **body**")
+    }
+
+    @Test func repeatedImageDropsDeliverCompleteOrderedSnapshotToEveryChannel() async throws {
+        let service = FakeDispatchService()
+        let controller = makeController(service)
+        controller.state.selectedPlatforms = [.zhihu, .jike, .x, .weibo, .juejin, .xiaohongshu]
+        controller.state.assetPaths = ["A", "B", "C", "D", "E", "F"]
+        controller.moveAsset("A", before: "C")
+        controller.moveAsset("F", before: "B")
+        controller.moveAsset("C", before: "A")
+        let expected = ["F", "B", "C", "A", "D", "E"]
+        #expect(controller.state.assetPaths == expected)
+        controller.dispatch()
+        controller.moveAsset("E", before: "F")
+        try await waitForDispatch(controller)
+        #expect(service.platforms == controller.state.selectedPlatforms)
+        #expect(service.requests.count == 6)
+        #expect(service.requests.allSatisfy { $0.assets == expected })
+        #expect(controller.state.assetPaths == expected)
+    }
+
     @Test func completionSnapshotPreservesOriginalTaskAndFailureForPresentation() async throws {
         let service = FakeDispatchService()
         service.statuses = [.jike: "needLogin"]

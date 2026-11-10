@@ -9,6 +9,36 @@ struct ChannelAdapterTests {
 
     private func bridge() throws -> EgoBridge { try EgoBridge(spaceName: "fake", engine: EgoLiteEngine(binaryPath: "/usr/bin/false")) }
 
+    @Test func reorderedAssetsReachAdaptersAndPreparedUploadsWithoutCropping() async throws {
+        let adapters = [PlatformID.zhihu, .jike, .x, .weibo, .juejin, .xiaohongshu].map {
+            RecordingAdapter(platform: $0, maximumImages: 6)
+        }
+        let service = DispatchService(registryFactory: { .init(adapters) }, bridgeFactory: { _ in try bridge() })
+        let defaults = UserDefaults(suiteName: "inkpost-order-\(UUID().uuidString)")!
+        let controller = DispatchController(service: service, settings: DispatchSettings(defaults: defaults))
+        let paths = try (1...6).map { try testAssetFile(orientation: $0).path }
+        controller.state.selectedPlatforms = adapters.map(\.platform)
+        controller.state.markdown = "保留正文🙂"
+        controller.state.assetPaths = paths
+        controller.moveAsset(paths[0], before: paths[2])
+        controller.moveAsset(paths[5], before: paths[1])
+        let expected = [paths[5], paths[1], paths[0], paths[2], paths[3], paths[4]]
+        controller.dispatch()
+        let deadline = Date().addingTimeInterval(3)
+        while controller.state.overallPhase == .preparing && Date() < deadline {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        #expect(controller.state.overallPhase == .failed) // Recording adapters request login.
+        let uploads = try #require(adapters.first?.uploads.first)
+        #expect(uploads.count == 6)
+        #expect(Set(uploads).count == 6)
+        for adapter in adapters {
+            #expect(adapter.requests.count == 1)
+            #expect(adapter.requests.first?.assets == expected)
+            #expect(adapter.uploads == [uploads])
+        }
+    }
+
     @Test func structuredRequestAndLoginResumeReusePage() async throws {
         let adapter = RecordingAdapter()
         var pages = 0

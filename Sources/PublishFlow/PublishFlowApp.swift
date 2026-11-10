@@ -1,7 +1,6 @@
 import SwiftUI
 import PublishKit
 
-@main
 struct PublishFlowApp: App {
     @NSApplicationDelegateAdaptor(AppLifecycle.self) private var lifecycle
     @State private var controller = DispatchController(service: DispatchService(), settings: DispatchSettings(), onCompletion: CompletionNoticePresentation.deliver)

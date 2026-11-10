@@ -15,8 +15,16 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, UNUserNotificationCen
         Task { for (taskID, workspaceID) in pending { await self.openNotification(taskID: taskID, workspaceID: workspaceID) } }
         menuBar = NativeMenuBar(controller: controller, presentation: presentation, openSettings: openSettings, window: window)
         showMainWindow()
+        ApplicationStartup.instance?.whenReady(activate: { [weak self] in
+            guard let self, let menuBar = self.menuBar else { return false }
+            self.showMainWindow()
+            return menuBar.mainWindow.isVisible
+        }, stop: { NSApp.terminate(nil) })
     }
-    func applicationWillTerminate(_ notification: Notification) { menuBar?.stop() }
+    func applicationWillTerminate(_ notification: Notification) {
+        ApplicationStartup.instance?.stopListening()
+        menuBar?.stop()
+    }
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Match LSUIElement before any window is shown, including unbundled development runs.
         NSApp.setActivationPolicy(.accessory)

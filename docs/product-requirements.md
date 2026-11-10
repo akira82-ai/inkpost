@@ -28,6 +28,7 @@
 
 ## Main window implementation
 
+- 墨驿在当前用户下仅允许一个应用进程实例，涵盖正常打开、直接执行和不同路径副本。重复启动唤起已有主窗口，不清空内容、修改渠道或重新启动任务；并发启动同样互斥。异常退出后可重新启动；已有实例无法响应时明确提示，不强杀旧实例或启动第二套发布界面。短暂的启动检查不创建编辑状态、任务或菜单栏图标。
 - Inkpost has one ordinary NSWindow at normal level using the former compact layout. No compact/full publishing mode or second editor. The former workspace is Settings only; do not add configuration capabilities during this migration.
 - Use the native titlebar with title 墨驿, visible standard close/minimize buttons and a disabled gray zoom button; no resizing or fullscreen. Close and minimize both hide the main window without quitting, cancelling, or minimizing to Dock. The right gear opens Settings.
 - Clicking the menu-bar icon shows or brings forward the same main window, including when it is covered by another app or belongs to another desktop; visibility alone must never make a click hide it. Explicit opening brings the window to the current desktop without switching desktops, activates once and focuses the body. Switching apps leaves it visible behind other apps, without raising Settings. Do not provide a Dock entry or depend on Dock reopen for access.

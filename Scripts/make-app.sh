@@ -12,12 +12,15 @@ fi
 swift build -c "$CONFIG" --scratch-path "$SCRATCH"
 BIN_DIR="$(swift build -c "$CONFIG" --scratch-path "$SCRATCH" --show-bin-path)"
 APP=".build/Inkpost-Compact.app"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+# Do not overwrite the running executable/resources before the replacement has passed signing.
+STAGING_ROOT="$(mktemp -d .build/inkpost-stage.XXXXXX)"
+STAGED_APP="$STAGING_ROOT/Inkpost-Compact.app"
+mkdir -p "$STAGED_APP/Contents/MacOS" "$STAGED_APP/Contents/Resources"
 swift Scripts/make-icon.swift .build/Inkpost.iconset
-iconutil -c icns .build/Inkpost.iconset -o "$APP/Contents/Resources/Inkpost.icns"
-cp "$BIN_DIR/PublishFlow" "$APP/Contents/MacOS/PublishFlow"
-cp -R "$BIN_DIR/PublishFlow_PublishKit.bundle" "$APP/Contents/Resources/"
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+iconutil -c icns .build/Inkpost.iconset -o "$STAGED_APP/Contents/Resources/Inkpost.icns"
+cp "$BIN_DIR/PublishFlow" "$STAGED_APP/Contents/MacOS/PublishFlow"
+cp -R "$BIN_DIR/PublishFlow_PublishKit.bundle" "$STAGED_APP/Contents/Resources/"
+cat > "$STAGED_APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -27,19 +30,27 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIconFile</key><string>Inkpost.icns</string>
 <key>CFBundleExecutable</key><string>PublishFlow</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.14.3</string>
+<key>CFBundleShortVersionString</key><string>0.14.4</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 <key>LSUIElement</key><true/>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PLIST
-codesign --force --sign "$INKPOST_SIGNING_IDENTITY" "$APP"
-codesign --verify --deep --strict "$APP"
+codesign --force --sign "$INKPOST_SIGNING_IDENTITY" "$STAGED_APP"
+codesign --verify --deep --strict "$STAGED_APP"
+# Quit all identified app copies gracefully, then the lock owner (including direct binaries).
+# Do not continue after a refusal/timeout or kill unrelated executables by name.
+swift Scripts/stop-app.swift
+"$STAGED_APP/Contents/MacOS/PublishFlow" --stop-running-instance
+if [[ -e "$APP" ]]; then
+  PREVIOUS_ROOT="$(mktemp -d .build/inkpost-previous.XXXXXX)"
+  mv "$APP" "$PREVIOUS_ROOT/Inkpost-Compact.app"
+  echo "Previous app preserved at $PREVIOUS_ROOT/Inkpost-Compact.app"
+fi
+mv "$STAGED_APP" "$APP"
+rmdir "$STAGING_ROOT"
 APP_EXECUTABLE="$(cd "$APP/Contents/MacOS" && pwd)/PublishFlow"
-while IFS= read -r pid; do
-  [[ -n "$pid" ]] && kill "$pid"
-done < <(pgrep -f "^${APP_EXECUTABLE}$" || true)
 open "$APP"
 sleep 2
 pgrep -f "^${APP_EXECUTABLE}$" >/dev/null || { echo "Inkpost failed to launch" >&2; exit 1; }

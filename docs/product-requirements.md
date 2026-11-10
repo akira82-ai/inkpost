@@ -35,7 +35,7 @@
 - Hide automatically once only after valid Start Filling begins execution. Progress, completion, failure, cancellation, login waiting, focus loss and Escape must not change visibility.
 - Main window and Settings share one DispatchController/DispatchModel. Task operations share the same model; the main window shows concise results and one navigation action, without execution logs or raw errors. NativeMenuBar owns status copy and fixed-size image animation; animation ticks never write title or item length. Window lifecycle remains in Views.
 
-- Product workflow ends at awaitingConfirm (已填好); no product UI for published or receipt tracking. On successful workspace handoff, archive the content, images and Space identity in session history, then reset the editor while retaining channel selection. Failed handoffs and incomplete tasks must retain content. Internal fixture CLI may retain receipt checks.
+- Product workflow ends at awaitingConfirm (已填好); no product UI for published or receipt tracking. On successful workspace handoff, archive the content, images and Space identity in session history, then reset the editor while retaining channel selection. Failed navigation and login-waiting tasks must retain content. Ended tasks with problems also archive/reset only after successful final Space navigation. Internal fixture CLI may retain receipt checks.
 - PNG encoding belongs exclusively to AssetService during task preparation, before any adapter/browser execution. DispatchService retains one complete prepared batch per task and passes its source-to-PNG mapping through ChannelExecutionContext while preserving the original ChannelRequest. Adapters upload only those PNG files; adapter-side or clipboard-side format conversion, repair, and fallback to originals are forbidden. Resume reuses the same batch; release it only after no invocation can use it. Reject unsupported animated/multiframe assets explicitly, never silently flatten them.
 - Assets use AssetService for validation and byte-based SHA-256 deduplication. The editor's current six-image selection limit is a product-level constraint, independent of each channel's supported image count. Pass every selected image to each selected adapter; the adapter reports any channel-specific excess rather than silently selecting a subset. Temporary assets are not durable drafts.
 - Image sorting drops insert the source immediately before the target, with an insertion marker at the target's leading edge. Dropping onto itself, cancelling or rejecting a drag preserves content and order; ending the drag clears its visual state. Sorting is disabled outside the pending editor phase. Display, model and complete channel requests use the same ordered assets; external image import is separate from internal sorting.
@@ -74,10 +74,22 @@
 
 - Read [Juejin adapter maintenance](../Sources/PublishKit/Services/Channels/JuejinChannelAdapter.md) before changing it. Ordinary pins only; title is optionally prepended with one newline, composed text at most 1000 UTF-16 units. First filling clears old body/attachments as authorized; resume must never clear again. Preserve raw editor input; the website itself trims edge whitespace on submission. Attachments are staged locally and uploaded only by the user’s final Publish action; verify all staged images without claiming remote upload.
 
-## 异常结果展示与导航（#47）
+## 异常结果展示与导航（#47，历史方案）
+
+以下记录 0.15.0 的方案；渠道入口、登录恢复和最终导航以 #48 的最新规则为准。
 
 - 主窗口任务结果区只保留一个前往按钮和静态结果说明，不展示执行日志、原始技术报错、渠道重试按钮、重复渠道卡片或修改未完成内容入口。执行中的停止填写能力保留。
 - 有异常时按钮为「前往处理」，说明如「4 个已填好 · 微博需处理」；多个异常列出名称，全部需处理时汇总数量。全部已填好时保留「已完成，前往发布」，最终发布仍由用户手工操作。
 - 前往处理优先定位本任务按任务顺序第一个未完成渠道的原 Page；其他渠道在同一个 ego 工作区切换。导航不重新填写、不新建渠道页面、不修改真实渠道结果，不清空未完成稿。
 - 原 Page 不可用时给出短提示，同一个按钮改为「打开工作区」；打开失败保留内容和入口，不静默跳首页。执行或交还中不并发开启导航、恢复、重置或编辑未完成任务。
 - 日志仍保留在内部诊断数据中，移除界面展示不等于吞掉执行错误。恢复自动填写的后续交互不在本项重新设计。
+
+## 渠道状态与填写交接（#48）
+
+- 采用 `prototypes/inkpost-completion-handoff.html` 已确认方案。渠道标签内用无背景线性图标显示填写中、填写成功、需登录、其他问题；图标具有文字提示与无障碍说明。编辑时标签选择渠道，任务中冻结选择，登录/问题图标独立点击打开该任务对应的原渠道 Page。
+- 有待登录渠道时主按钮「我已登录，继续」。点击后只恢复登录等待渠道，复用原输入快照、任务、Space 和 Page；已填好渠道不重复执行。普通异常不自动重试，也不把超时推断为未登录。可跳过剩余待登录渠道转为手工处理。
+- 等待登录是过程状态，不发最终完成通知、不完成 Space。其他渠道继续本轮填写；若执行中点击登录/问题图标，导航请求先排队，待本轮其他渠道停止自动操作后才打开目标 Page 并交还整个 Space，避免用户与 Agent 同时操作。
+- 全部填好：主按钮「已填写，需要你手工发布」；存在其他问题、跳过或取消：主按钮「去查看」。自动流程结束后完成 ego Space 并保留页面交还控制权；仅表示填写结束，不表示内容已发布。控制权交还失败必须明确提示，不能伪报成功。
+- 最终主按钮打开本次任务 Space，成功后归档并清空标题、正文、图片，保留渠道选择；打开失败保留内容与重试入口。渠道图标只导航，不重置、不改变渠道结果。通知导航不清空其他任务。
+- 自动填写已结束且最终打开工作区失败时，在报错后同排显示轻量文字按钮「我已处理，忽略」。点击无需二次确认，不再访问 ego，直接清空标题、正文、图片及本次任务状态，保留渠道选择并恢复正文焦点；执行中、等待登录或导航进行中不可用。
+- 完成后的 Space 不可继续填写；原 Page 标签失效时，只能通过保存的唯一页面身份重新定位，无法唯一确认时明确报错，不跳其他渠道或首页。无消散动画。

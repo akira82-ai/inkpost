@@ -32,12 +32,19 @@ struct ChannelNavigationTests {
             #expect(focused.json?["count"] as? Int == 2)
             #expect(focused.string("active") == "p2")
             await #expect(throws: ChannelNavigationError.pageUnavailable) { try await service.openChannel(.weibo) }
+            try await service.completeTask()
+            let completed = try await engine.runRaw(script: """
+            const info = (await listTaskSpaces()).find(space => space.id === \(space));
+            cliLog(JSON.stringify({ownership:info?.ownership}));
+            """)
+            #expect(completed.string("ownership") == "user")
+            try await service.openChannel(.x)
             try await service.openWorkspace(id: space)
         } catch {
-            _ = try? await engine.runRaw(script: "const task = await takeOverTaskSpace(\(space)); await task.finish({keep:[]}); cliLog(JSON.stringify({ok:true}));")
+            _ = try? await engine.runRaw(script: "const info = (await listTaskSpaces()).find(s => s.id === \(space)); const task = await (info?.ownership === 'user' ? claimTaskSpace : takeOverTaskSpace)(\(space)); for (const tab of await task.tabs()) { if (!tab.label) await task.adopt(tab.page); } await task.finish({keep:[]}); cliLog(JSON.stringify({ok:true}));")
             throw error
         }
-        _ = try await engine.runRaw(script: "const task = await takeOverTaskSpace(\(space)); await task.finish({keep:[]}); cliLog(JSON.stringify({ok:true}));")
+        _ = try await engine.runRaw(script: "const info = (await listTaskSpaces()).find(s => s.id === \(space)); const task = await (info?.ownership === 'user' ? claimTaskSpace : takeOverTaskSpace)(\(space)); for (const tab of await task.tabs()) { if (!tab.label) await task.adopt(tab.page); } await task.finish({keep:[]}); cliLog(JSON.stringify({ok:true}));")
     }
 }
 
@@ -46,7 +53,7 @@ private final class NavigationFixtureAdapter: ChannelAdapter {
     let capabilities = ChannelCapabilities(usesTitle: false, maximumImages: 0, isArticle: false)
     init(platform: PlatformID) { self.platform = platform }
     @MainActor func execute(request: ChannelRequest, context: ChannelExecutionContext) async throws -> ChannelOutcome {
-        _ = try await context.bridge.navigate(url: Resources.url("fixture-page", ext: "html", sub: "Fixtures").absoluteString)
+        _ = try await context.bridge.navigate(url: Resources.url("fixture-page", ext: "html", sub: "Fixtures").absoluteString + "?channel=\(platform.rawValue)")
         return .failed(.init(code: .verificationFailed, stage: .verifyingContent,
                              detail: "Local navigation fixture", recovery: .inspectionRequired))
     }

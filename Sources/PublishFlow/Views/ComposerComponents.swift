@@ -332,25 +332,60 @@ struct ChannelBadge: View {
 struct ChannelGrid: View {
     let model: DispatchModel
     let controller: DispatchController
+    private var editing: Bool { model.overallPhase == .pending }
     var body: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
             ForEach(ChannelPresentation.all.filter(\.available)) { channel in
-                Button {
-                    if channel.available, let platform = channel.platform { controller.select(platform) }
-                    else { model.notice = "\(channel.name) 尚未适配，暂不可选" }
-                } label: {
-                    HStack(spacing: 4) { ChannelBadge(channel: channel); Text(channel.name).font(InkStyle.font(11)).fixedSize() }
-                        .padding(.horizontal, 4).frame(height: 32).frame(maxWidth: .infinity)
-                        .background(channel.isSelected(in: model) ? InkStyle.selected : .clear, in: RoundedRectangle(cornerRadius: 7))
-                        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(channel.isSelected(in: model) ? InkStyle.selectedLine : InkStyle.line))
-                        .contentShape(RoundedRectangle(cornerRadius: 7))
-                }.buttonStyle(.plain).foregroundStyle(InkStyle.ink)
-                    .disabled(model.overallPhase != .pending)
-                    .help(channel.available ? channel.name : "\(channel.name) 待适配，暂不可选")
-                    .accessibilityLabel(channel.available ? channel.name : "\(channel.name)，待适配")
-                    .accessibilityAddTraits(channel.isSelected(in: model) ? .isSelected : [])
+                Group {
+                    if editing {
+                        Button {
+                            if let platform = channel.platform { controller.select(platform) }
+                        } label: { label(channel) }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(channel.name)
+                        .accessibilityAddTraits(channel.isSelected(in: model) ? .isSelected : [])
+                    } else {
+                        label(channel)
+                    }
+                }
+                .foregroundStyle(InkStyle.ink)
+                .background(channel.isSelected(in: model) ? InkStyle.selected : .clear, in: RoundedRectangle(cornerRadius: 7))
+                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(channel.isSelected(in: model) ? InkStyle.selectedLine : InkStyle.line))
             }
         }.transaction { $0.animation = nil }
+    }
+
+    private func label(_ channel: ChannelPresentation) -> some View {
+        HStack(spacing: 4) {
+            ChannelBadge(channel: channel)
+            Text(channel.name).font(InkStyle.font(11)).lineLimit(1).frame(maxWidth: .infinity)
+            if !editing, let platform = channel.platform, model.taskPlatforms.contains(platform),
+               let phase = model.platformPhase[platform] {
+                statusIcon(ChannelStatusPresentation(phase: phase), platform: platform)
+            }
+        }.padding(.horizontal, 6).frame(height: 36).frame(maxWidth: .infinity)
+            .contentShape(RoundedRectangle(cornerRadius: 7))
+    }
+
+    @ViewBuilder private func statusIcon(_ status: ChannelStatusPresentation, platform: PlatformID) -> some View {
+        if status.canOpen {
+            Button { controller.openChannel(platform) } label: {
+                Image(systemName: status.symbol).font(.system(size: 12, weight: .medium))
+                    .frame(width: 24, height: 26).contentShape(Rectangle())
+            }.buttonStyle(.plain).foregroundStyle(Color(hex: status == .login ? 0x977126 : 0xA16C42))
+                .disabled(model.isHandingOff || model.isSettling)
+                .help("\(platform.title)：\(status.title)，点击前往对应页面")
+                .accessibilityLabel("\(platform.title)，\(status.title)，前往对应页面")
+        } else if status == .filling {
+            ProgressView().controlSize(.mini).frame(width: 24, height: 26)
+                .help("\(platform.title)：\(status.title)")
+                .accessibilityLabel("\(platform.title)，\(status.title)")
+        } else {
+            Image(systemName: status.symbol).font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Color(hex: 0x567749)).frame(width: 24, height: 26)
+                .help("\(platform.title)：\(status.title)")
+                .accessibilityLabel("\(platform.title)，\(status.title)")
+        }
     }
 }
 
@@ -362,12 +397,13 @@ struct DispatchAction: View {
     private var filling: Bool { model.overallPhase == .preparing }
     private var title: String {
         if model.isHandingOff { return "正在打开…" }
-        if model.opensWorkspaceAfterMissingPage { return "打开工作区 ↗" }
+        if model.isSettling { return "正在交还浏览器…" }
         switch model.overallPhase {
-        case .pending: return "开始填写"
+        case .pending: return "发布"
         case .preparing: return "正在填写 · \(model.currentPlatform?.title ?? "所选渠道")"
-        case .awaitingConfirm: return "已完成，前往发布"
-        default: return "前往处理 ↗"
+        case .needLogin: return "我已登录，继续"
+        case .awaitingConfirm: return "已填写，需要你手工发布"
+        default: return "去查看"
         }
     }
     var body: some View {
@@ -379,7 +415,7 @@ struct DispatchAction: View {
                         .onAppear { pulse = true }.onDisappear { pulse = false }
                         .animation(reduceMotion ? nil : .easeInOut(duration: 0.65).repeatForever(autoreverses: true), value: pulse)
                 }
-                if filling {
+                if filling && !model.isSettling {
                     HStack(spacing: 6) {
                         Text("正在填写 ·")
                         Text(model.currentPlatform?.title ?? "所选渠道")
@@ -393,11 +429,12 @@ struct DispatchAction: View {
                 .frame(maxWidth: .infinity).padding(.horizontal, 12).frame(height: 42).clipped()
                 .foregroundStyle(InkStyle.paper).background(InkStyle.ink, in: RoundedRectangle(cornerRadius: 8))
                 .contentShape(RoundedRectangle(cornerRadius: 8))
-        }.buttonStyle(.plain).disabled(filling || model.isHandingOff)
+        }.buttonStyle(.plain).disabled(filling || model.isHandingOff || model.isSettling)
             .animation(reduceMotion ? nil : .timingCurve(0.2, 0.7, 0.3, 1, duration: 0.42), value: model.currentPlatform)
             .accessibilityLabel(title)
     }
     private func act() {
+        if model.overallPhase == .needLogin { controller.resumeWaitingLogins(); return }
         guard model.overallPhase == .pending else { controller.openTaskDestination(); return }
         guard controller.canDispatch else { model.notice = "请填写正文并至少选择一个渠道；标题和图片可不填"; return }
         controller.dispatch()
@@ -413,6 +450,9 @@ struct DispatchStatus: View {
         case .preparing:
             let index = model.currentPlatform.flatMap { model.taskPlatforms.firstIndex(of: $0) }.map { $0 + 1 } ?? 0
             return "正在填写 \(index)/\(model.taskPlatforms.count) 个渠道，可以先忙别的，完成后我会提醒你"
+        case .needLogin:
+            let ready = model.taskPlatforms.filter { model.platformPhase[$0] == .awaitingConfirm }.count
+            return "\(ready) 个已填好 · \(model.waitingLoginPlatforms.count) 个待登录"
         case .awaitingConfirm:
             return "\(model.taskPlatforms.count) 个渠道已填好，请确认后手工发布。"
         default:
@@ -425,9 +465,9 @@ struct DispatchStatus: View {
         }
     }
     var body: some View {
-        Text(message).font(InkStyle.font(10)).foregroundStyle(InkStyle.muted)
+        Text(message).font(InkStyle.font(11)).foregroundStyle(InkStyle.muted)
             .multilineTextAlignment(.center).lineSpacing(4)
-            .frame(maxWidth: .infinity).fixedSize(horizontal: false, vertical: true)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 

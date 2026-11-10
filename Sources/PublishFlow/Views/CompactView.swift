@@ -15,6 +15,9 @@ struct CompactView: View {
         .background(WindowReader { mainWindow = $0 })
         .foregroundStyle(InkStyle.ink).preferredColorScheme(.light)
         .modifier(NoticeOverlay(model: model))
+        .onChange(of: model.overallPhase) { _, phase in
+            if phase == .pending { presentation.bodyFocusRequest = UUID() }
+        }
         .modifier(TaskWindowPresentation(model: model, presentation: presentation, dismiss: { mainWindow?.orderOut(nil) }))
     }
     private var composer: some View {
@@ -33,13 +36,32 @@ struct CompactView: View {
             Rectangle().fill(InkStyle.line).frame(height: 1)
             VStack(spacing: 9) {
                 DispatchAction(model: model, controller: controller)
-                DispatchStatus(model: model)
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    DispatchStatus(model: model)
+                    if model.overallPhase == .needLogin {
+                        Rectangle().fill(InkStyle.line).frame(width: 1, height: 12)
+                        Button("跳过，手工处理", action: controller.skipWaitingLogins)
+                            .buttonStyle(.plain).font(InkStyle.font(11)).foregroundStyle(InkStyle.muted)
+                            .disabled(model.isHandingOff || model.isSettling)
+                    }
+                }.frame(maxWidth: .infinity)
                 if model.overallPhase == .preparing {
                     Button("停止填写", action: controller.cancel).buttonStyle(.plain).font(InkStyle.font(11))
                 }
                 if let message = model.navigationMessage {
-                    Text(message).font(InkStyle.font(10)).foregroundStyle(Color(hex: 0x8B542B))
-                        .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(message).multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if model.canIgnoreWorkspaceError && model.hasEnded {
+                            Button(action: controller.ignoreWorkspaceError) {
+                                Text("我已处理，忽略").underline()
+                            }.buttonStyle(.plain)
+                                .fixedSize()
+                                .disabled(model.isHandingOff || model.isSettling)
+                                .accessibilityHint("清空本次内容并恢复初始状态，保留渠道选择")
+                        }
+                    }.font(InkStyle.font(10)).foregroundStyle(Color(hex: 0x8B542B))
+                        .frame(maxWidth: .infinity)
                 }
             }.padding(.top, 11).padding(.horizontal, 18).padding(.bottom, 15)
         }.fixedSize(horizontal: false, vertical: true)

@@ -28,7 +28,7 @@ struct ChannelAdapterTests {
         while controller.state.overallPhase == .preparing && Date() < deadline {
             try await Task.sleep(for: .milliseconds(1))
         }
-        #expect(controller.state.overallPhase == .failed) // Recording adapters request login.
+        #expect(controller.state.overallPhase == .needLogin) // Recording adapters request login.
         let uploads = try #require(adapters.first?.uploads.first)
         #expect(uploads.count == 6)
         #expect(Set(uploads).count == 6)

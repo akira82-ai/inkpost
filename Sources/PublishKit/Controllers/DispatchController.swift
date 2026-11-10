@@ -16,6 +16,7 @@ public final class DispatchController {
     @ObservationIgnored private var draftRequest: ChannelRequest?
     @ObservationIgnored private var attempts: [PlatformID: UUID] = [:]
     @ObservationIgnored private var generation = UUID()
+    @ObservationIgnored private var queuedChannel: PlatformID?
 
     public init(service: any DispatchServicing, settings: DispatchSettings, state: DispatchModel? = nil, onCompletion: @escaping @MainActor (DispatchCompletion) -> Void = { _ in }) {
         self.onCompletion = onCompletion
@@ -83,12 +84,15 @@ public final class DispatchController {
         // Removing an earlier source shifts the target one slot to the left.
         state.assetPaths.insert(path, at: from < to ? to - 1 : to)
     }
-    /// The sole result action prefers the first unfinished channel. A missing Page exposes
-    /// workspace navigation on the same button, without treating navigation as successful filling.
-    public func openTaskDestination() {
-        guard state.overallPhase != .pending, state.overallPhase != .preparing, !state.isHandingOff else { return }
-        guard !state.opensWorkspaceAfterMissingPage, let platform = state.attentionPlatforms.first else {
-            openWorkspace()
+    /// Final actions open the task Space. Channel icons navigate without clearing the draft.
+    public func openTaskDestination() { openWorkspace() }
+
+    public func openChannel(_ platform: PlatformID) {
+        guard state.taskPlatforms.contains(platform), !state.isHandingOff, !state.isSettling,
+              [.needLogin, .failed, .cancelled].contains(state.platformPhase[platform]) else { return }
+        if state.overallPhase == .preparing {
+            queuedChannel = platform
+            state.navigationMessage = "其余渠道填写结束后，将打开\(platform.title)页面。"
             return
         }
         state.isHandingOff = true
@@ -96,25 +100,22 @@ public final class DispatchController {
         let token = generation
         Task {
             defer { if generation == token { state.isHandingOff = false } }
-            do {
-                try await service.openChannel(platform)
-            } catch {
+            do { try await service.openChannel(platform) }
+            catch {
                 guard generation == token else { return }
-                if case ChannelNavigationError.pageUnavailable = error {
-                    state.opensWorkspaceAfterMissingPage = true
-                    state.navigationMessage = "\(platform.title)页面不可用，请打开工作区查看。"
-                } else {
-                    state.navigationMessage = "未能打开渠道页面，内容已保留，请重试。"
-                }
+                state.navigationMessage = error is ChannelNavigationError
+                    ? "\(platform.title)页面不可用，请在本次任务工作区中检查。"
+                    : "未能打开渠道页面，内容已保留，请重试。"
                 log(error.localizedDescription)
             }
         }
     }
 
     public func openWorkspace() {
-        guard state.overallPhase != .preparing, !state.isHandingOff else { return }
+        guard state.hasEnded, !state.isHandingOff, !state.isSettling else { return }
         state.isHandingOff = true
-        let completed = state.overallPhase == .awaitingConfirm
+        state.canIgnoreWorkspaceError = false
+        let completed = state.hasEnded
         let token = generation
         state.navigationMessage = nil
         Task {
@@ -128,7 +129,7 @@ public final class DispatchController {
                         platforms: state.taskPlatforms, assetPaths: state.assetPaths,
                         assetData: state.assetData, workspaceID: service.workspaceID), at: 0)
                     state.isHandingOff = false
-                    newDraft()
+                    clearCompletedDraft()
                     state.eventLog = []
                     state.platformPhase = [:]
                     state.notice = "上一份已交接，可以开始新一份内容"
@@ -136,9 +137,18 @@ public final class DispatchController {
             } catch {
                 guard generation == token else { return }
                 state.navigationMessage = "未能打开工作区，内容已保留，请重试。"
+                state.canIgnoreWorkspaceError = true
                 log(error.localizedDescription)
             }
         }
+    }
+    /// Explicit acknowledgement ends the local task without accessing the browser again.
+    public func ignoreWorkspaceError() {
+        guard state.canIgnoreWorkspaceError, state.hasEnded,
+              !state.isHandingOff, !state.isSettling else { return }
+        clearCompletedDraft()
+        state.eventLog = []
+        state.notice = nil
     }
     /// Notification navigation does not archive/reset content or alter another task's state.
     public func openNotificationWorkspace(taskID: UUID, workspaceID: Int) async {
@@ -155,29 +165,93 @@ public final class DispatchController {
             log("通知工作区 \(workspaceID)：\(error.localizedDescription)")
         }
     }
-    public func resume(_ platform: PlatformID) {
-        guard !state.isHandingOff, state.overallPhase != .preparing, state.platformOutcomes[platform]?.canResume == true, draftRequest != nil else { return }
+    public func resumeWaitingLogins() { resumePlatforms(state.waitingLoginPlatforms) }
+
+    public func resume(_ platform: PlatformID) { resumePlatforms([platform]) }
+
+    private func resumePlatforms(_ platforms: [PlatformID]) {
+        guard state.overallPhase == .needLogin, !state.isHandingOff, !state.isSettling,
+              draftRequest != nil, !platforms.isEmpty,
+              platforms.allSatisfy({ state.waitingLoginPlatforms.contains($0) }) else { return }
         state.overallPhase = .preparing
+        state.navigationMessage = nil
         let token = generation
         runningTask = Task {
-            do { try await service.resumeControl(); try await runOnePlatform(platform, command: .resumeAfterUser) }
-            catch {
+            do {
+                try await service.resumeControl()
+                for platform in platforms {
+                    try Task.checkCancellation()
+                    guard generation == token else { return }
+                    do { try await runOnePlatform(platform, command: .resumeAfterUser) }
+                    catch {
+                        if error is CancellationError || Task.isCancelled { throw CancellationError() }
+                        apply(.failed(.init(code: .executionFailed, stage: .openingEditor,
+                            detail: error.localizedDescription, recovery: .inspectionRequired)), to: platform)
+                    }
+                }
+            } catch {
                 guard generation == token else { return }
-                if error is CancellationError || Task.isCancelled { state.platformPhase[platform] = .cancelled }
-                else { apply(.failed(.init(code: .executionFailed, stage: .openingEditor, detail: error.localizedDescription, recovery: .retryAllowed)), to: platform) }
+                if error is CancellationError || Task.isCancelled {
+                    for platform in state.taskPlatforms where [.needLogin, .pending, .preparing].contains(state.platformPhase[platform]) {
+                        state.platformPhase[platform] = .cancelled
+                    }
+                } else {
+                    state.navigationMessage = "未能恢复浏览器控制权，内容已保留，请重试。"
+                    log(error.localizedDescription)
+                }
             }
             guard generation == token else { return }
-            finishTask()
+            await finishTask()
         }
     }
-    private func finishTask() {
+
+    public func skipWaitingLogins() {
+        guard state.overallPhase == .needLogin, !state.isHandingOff, !state.isSettling else { return }
+        for platform in state.waitingLoginPlatforms {
+            apply(.failed(.init(code: .executionFailed, stage: .checkingLogin,
+                detail: "已跳过登录，请手工处理", recovery: .inspectionRequired)), to: platform)
+        }
+        state.overallPhase = .preparing
+        runningTask = Task { await finishTask() }
+    }
+
+    private func finishTask() async {
+        let token = generation
         state.currentPlatform = nil
-        state.overallPhase = state.taskPlatforms.contains { state.platformPhase[$0] == .cancelled } ? .cancelled : (state.taskPlatforms.allSatisfy { state.platformPhase[$0] == .awaitingConfirm } ? .awaitingConfirm : .failed)
-        let message = state.overallPhase == .cancelled ? "已停止处理，内容已保留，请检查浏览器页面" : (state.overallPhase == .awaitingConfirm ? "全部已填好，请检查并发布" : "部分渠道需要您手工处理")
-        state.notice = message
-        onCompletion(DispatchCompletion(taskID: state.taskID, workspaceID: notificationWorkspaceID,
-            phase: state.overallPhase, platforms: state.taskPlatforms, phases: state.platformPhase,
-            failures: state.platformOutcomes.compactMapValues(\.failure)))
+        let cancelled = state.taskPlatforms.contains { state.platformPhase[$0] == .cancelled }
+        if cancelled {
+            for platform in state.waitingLoginPlatforms { state.platformPhase[platform] = .cancelled }
+        }
+        let phase: TargetPhase = cancelled ? .cancelled : !state.waitingLoginPlatforms.isEmpty ? .needLogin
+            : state.taskPlatforms.allSatisfy { state.platformPhase[$0] == .awaitingConfirm } ? .awaitingConfirm : .failed
+        state.isSettling = true
+        // Cancellation stops editor operations, but must not cancel returning browser control.
+        let settlement = Task { @MainActor in
+            do {
+                if phase == .needLogin { try await service.handOff() }
+                else { try await service.completeTask() }
+            } catch {
+                guard generation == token else { return }
+                state.navigationMessage = "未能交还浏览器控制权，内容已保留；可点击渠道图标或前往按钮重试。"
+                log("浏览器收尾失败：\(error.localizedDescription)")
+            }
+        }
+        await settlement.value
+        guard generation == token else { return }
+        state.isSettling = false
+        state.overallPhase = phase
+        if phase == .needLogin {
+            state.notice = "请点击渠道旁的登录图标，登录后继续填写"
+        } else {
+            state.notice = phase == .awaitingConfirm ? "全部已填好，请检查并发布" : "填写已结束，请前往浏览器检查"
+            onCompletion(DispatchCompletion(taskID: state.taskID, workspaceID: notificationWorkspaceID,
+                phase: phase, platforms: state.taskPlatforms, phases: state.platformPhase,
+                failures: state.platformOutcomes.compactMapValues(\.failure)))
+        }
+        if let platform = queuedChannel {
+            queuedChannel = nil
+            openChannel(platform)
+        }
     }
     // MARK: - 分发
 
@@ -211,7 +285,7 @@ public final class DispatchController {
                     state.platformPhase[p] = cancelled ? .cancelled : .failed
                     state.platformMessages[p] = cancelled ? "已取消" : error.localizedDescription
                 }
-                finishTask(); return
+                await finishTask(); return
             }
             for p in platforms {
                 guard token == generation else { return }
@@ -232,7 +306,7 @@ public final class DispatchController {
                 }
             }
             guard generation == token else { return }
-            finishTask()
+            await finishTask()
             if platforms.allSatisfy({ state.platformPhase[$0] == .awaitingConfirm || state.platformPhase[$0] == .needLogin }) {
                 log("全部平台处理完毕。请在 ego 浏览器逐个检查草稿并亲手发布。")
             }
@@ -282,7 +356,7 @@ public final class DispatchController {
     }
 
     public func cancel() {
-        guard state.overallPhase == .preparing else { return }
+        guard state.overallPhase == .preparing, !state.isSettling else { return }
         runningTask?.cancel()
     }
 
@@ -294,12 +368,16 @@ public final class DispatchController {
     }
     public func newDraft() {
         guard state.overallPhase == .awaitingConfirm else { return }
+        clearCompletedDraft()
+    }
+    private func clearCompletedDraft() {
+        guard state.hasEnded, !state.isHandingOff, !state.isSettling else { return }
         reset()
         state.title = ""; state.markdown = ""
         state.assetPaths = []; state.assetData = [:]
     }
     public func reset() {
-        guard state.overallPhase != .preparing, !state.isHandingOff else { return }
+        guard state.overallPhase != .preparing, !state.isHandingOff, !state.isSettling else { return }
         generation = UUID()
         runningTask?.cancel()
         state.currentPlatform = nil
@@ -308,11 +386,12 @@ public final class DispatchController {
         state.taskPlatforms = []
         state.taskID = nil
         notificationWorkspaceID = nil
+        queuedChannel = nil
         draftRequest = nil
         state.overallPhase = .pending
         state.errorMessage = nil
         state.navigationMessage = nil
-        state.opensWorkspaceAfterMissingPage = false
+        state.canIgnoreWorkspaceError = false
         for p in state.selectedPlatforms { state.platformPhase[p] = .pending }
     }
 }

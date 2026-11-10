@@ -59,6 +59,7 @@ struct MenuBarStatus {
         case .pending: return ""
         case .preparing:
             return model.currentPlatform.map { "正在填写：\($0.title)" } ?? "正在准备"
+        case .needLogin: return "等待登录：" + model.waitingLoginPlatforms.map(\.title).joined(separator: "、")
         case .awaitingConfirm: return "已填好，请确认"
         case .cancelled: return "已停止"
         default:

@@ -91,6 +91,25 @@ swift test --no-parallel \
 - release 构建通过；正式身份 Inkpost（SHA-1 `4E15EF1D792EBC692CD2DE06AFC4F242B35D5A99`）strict/deep 验签通过，新应用 `.build/Inkpost-Compact.app` 已启动，检查时 PID 21516。旧包由项目打包脚本保留在 `.build/inkpost-previous.IaPtoV/Inkpost-Compact.app`。未在正式应用中运行真实渠道任务，不能将分层验证视为真实社媒全流程验收。
 - 默认旧构建缓存带有历史项目路径，测试和构建分别使用 `.build/issue47-tests`、`.build/issue47-release`，未清除其他缓存。
 
+## 渠道状态、登录恢复与任务交接（#48，2026-11-10）
+
+- 沿用 DispatchModel、DispatchController、DispatchService；等待登录为中间态，仅恢复本轮等待渠道，沿用输入快照和原 Page，已填好渠道不重复。视图以无背景状态图标呈现填写中、已填好、需登录、其他问题；登录/问题图标独立可点击，提供悬停和无障碍说明。
+- ego 控制权以 Space 为单位。自动操作期间的渠道导航排队，待本轮其余渠道执行结束后打开；等待登录 handOff，所有自动操作终止后 finish 并保留 Pages。完成后按捕获的原 URL 唯一定位渠道 Page；URL 变化、重复或缺失时报错，不跳到猜测页面。
+- 最终主按钮打开任务 Space，成功后归档并清空标题、正文、图片，保留渠道选择；异常、跳过、取消均适用，导航失败保留稿件。渠道图标导航不重置，通知导航不清空其他任务。收尾、导航、继续互斥，取消后仍执行交还。
+- 基线 106 tests / 21 suites 通过；最终完整串行回归 111 tests / 21 suites 通过（128.474 秒）。覆盖批量登录恢复、成功渠道不重做、跳过、取消、收尾失败、导航排队、重复点击与旧事件隔离。测试日志 `/tmp/inkpost48-verified-tests.log`；本地 compact-smoke 通过，无真实发布。
+- 本地 ego fixture 验证原 Page 切换、缺失反馈、完成后 user ownership、重开渠道与 Space；原生 NSHostingView 覆盖等待登录等五种任务状态布局。正式应用实测窗口启动、三列渠道、正文中文/空行/emoji 粘贴，验收文字已清理。
+- release 构建与正式身份 Inkpost（SHA-1 `4E15EF1D792EBC692CD2DE06AFC4F242B35D5A99`）strict/deep 验签通过；`.build/Inkpost-Compact.app` 已启动，检查时 PID 44501。旧包保留在 `.build/inkpost-previous.R8fndr/Inkpost-Compact.app`，版本仍为 0.15.0。测试与 release 使用独立 `.build/issue48-*` 缓存。
+- 尚未验收真实平台多渠道登录后续填和正式应用最终按钮到浏览器的完整链路；自动化与 fixture 不代表真实社媒全流程通过。上述为实现阶段记录，交付复核见下。
+
+### #48 工作区打开失败后的本地结束入口（2026-11-10）
+
+- 最终导航失败后显示「我已处理，忽略」，与错误提示同排，复用现有清空稿件与 pending 正文聚焦路径。只有已结束任务且最终工作区导航失败才启用；导航、收尾期间不可用，不增加浏览器调用或重建任务。
+- 点击清空标题、正文、图片、任务身份、渠道结果和错误提示，保留渠道选择，无二次确认。未点击前继续保留内容与重试能力。
+- 最终专项 40 tests / 2 suites 通过（0.471 秒），覆盖三种终态、重复点击、内容/图片清空、渠道选择保留、无新增浏览器操作及执行中/登录等待/交还中的保护；原生截图确认错误文字与按钮同排且窗口高度小于 600pt。没有重新执行真实社媒发布。
+- 修复版 release 构建及正式签名验签通过，项目脚本已停止旧应用并启动新版；旧包保留于 `.build/inkpost-previous.xy0uf1/Inkpost-Compact.app`。上述为专项修复阶段记录。
+
+- 0.16.0 交付复核：最终代码全量串行 113 tests / 21 suites 通过（128.407 秒）；真实 ego 本地 fixture 导航专项通过（5.497 秒），验证完成后 user ownership、保留页面及重开渠道与 Space。compact-smoke、原型 JavaScript 与打包脚本语法、差异检查、正式签名 release 构建启动通过；DMG 完整性、ZIP 解压验签、版本与 SHA256 校验通过。真实平台登录续填及正式应用完整跳转链路仍待验收，相关开放 Issue 保持开启。
+
 ## 原型交付规范
 
 - Organize HTML prototypes vertically into three sections in this order:

@@ -8,6 +8,7 @@ public protocol DispatchServicing {
     var workspaceID: Int? { get }
     func beginTask(id: UUID) async throws
     func handOff() async throws
+    func completeTask() async throws
     func resumeControl() async throws
     func openWorkspace(id: Int) async throws
     func openChannel(_ platform: PlatformID) async throws
@@ -18,6 +19,8 @@ public enum ChannelNavigationError: Error, Equatable {
 }
 
 public extension DispatchServicing {
+    func completeTask() async throws { try await handOff() }
+
     func openChannel(_ platform: PlatformID) async throws {
         throw ChannelNavigationError.pageUnavailable
     }
@@ -39,6 +42,8 @@ public final class DispatchService: DispatchServicing {
     private var spaceName = ""
     private var spaceID: Int?
     private var handedOff = false
+    private var completed = false
+    private var completedPageURLs: [String: String] = [:]
     private var registry: ChannelRegistry
     private let makeRegistry: () -> ChannelRegistry
     private var bridgeFactory: ((PlatformID) async throws -> EgoBridge)?
@@ -55,7 +60,7 @@ public final class DispatchService: DispatchServicing {
         assetPreparation = nil; taskRequest = nil
         taskID = id; sessions = [:]
         spaceName = "inkpost \(UUID().uuidString)"
-        bridges = [:]; spaceID = nil; handedOff = false
+        bridges = [:]; spaceID = nil; handedOff = false; completed = false; completedPageURLs = [:]
         registry = makeRegistry()
     }
     public func handOff() async throws {
@@ -64,40 +69,90 @@ public final class DispatchService: DispatchServicing {
         _ = try await EgoLiteEngine().runRaw(script: "const task = await taskSpace(\(id)); await task.handOff(); cliLog(JSON.stringify({ok:true}));")
         handedOff = true
     }
-    /// Explicit notification clicks authorize opening this exact Space, never the current task by inference.
+    /// Complete the Agent task while preserving every task Page for manual publishing.
+    public func completeTask() async throws {
+        guard !completed, let id = spaceID else { return }
+        guard activeAttempts.isEmpty else { throw EgoBridge.BridgeError.toolFailed("渠道仍在执行，不能完成工作区") }
+        let result = try await EgoLiteEngine().runRaw(script: """
+        const info = (await listTaskSpaces()).find(space => space.id === \(id));
+        if (!info) throw new Error("本次任务工作区已不存在");
+        if (info.ownership === "user") {
+            cliLog(JSON.stringify({ok:true, urls:{}}));
+        } else {
+            const task = await \(handedOff ? "takeOverTaskSpace" : "taskSpace")(\(id));
+            const tabs = await task.tabs();
+            const urls = Object.fromEntries(tabs.filter(tab => tab.label).map(tab => [tab.label, tab.url]));
+            await task.finish({keep: tabs.filter(tab => tab.label).map(tab => tab.label)});
+            cliLog(JSON.stringify({ok:true, urls}));
+        }
+        """)
+        guard result.bool("ok") == true else { throw EgoBridge.BridgeError.noResult(result.rawOutput) }
+        completedPageURLs = result.json?["urls"] as? [String: String] ?? [:]
+        completed = true
+        handedOff = true
+    }
+
+    /// Only a user action may reopen an exact completed or paused Space.
     public func openWorkspace(id: Int) async throws {
         guard id > 0 else { throw EgoBridge.BridgeError.toolFailed("无效的浏览器工作区") }
-        if id == spaceID, !handedOff {
-            guard activeAttempts.isEmpty else { throw EgoBridge.BridgeError.toolFailed("此工作区仍在填写中，请完成后再打开") }
-            try await handOff()
-            return
+        guard id != spaceID || activeAttempts.isEmpty else {
+            throw EgoBridge.BridgeError.toolFailed("此工作区仍在填写中，请完成后再打开")
         }
-        // A handed-off Agent Space cannot be reopened with taskSpace(). Resume only on the
-        // user's explicit click and immediately hand it back; never run editor operations here.
-        _ = try await EgoLiteEngine().runRaw(script: "const task = await takeOverTaskSpace(\(id)); await task.handOff(); cliLog(JSON.stringify({ok:true}));")
+        if id == spaceID, !completed {
+            try await completeTask()
+        }
+        _ = try await EgoLiteEngine().runRaw(script: """
+        const info = (await listTaskSpaces()).find(space => space.id === \(id));
+        if (!info) throw new Error("对应的工作区已不存在");
+        const wasCompleted = info.ownership === "user";
+        const task = await (wasCompleted ? claimTaskSpace : takeOverTaskSpace)(\(id));
+        try {
+            const tabs = await task.tabs();
+            const active = tabs.find(tab => tab.active) || tabs[0];
+            if (!active) throw new Error("对应的工作区没有可查看页面");
+            const page = active.label ? task.page(active.label) : await task.adopt(active.page);
+            await page.cdp("Page.bringToFront");
+        } finally {
+            if (wasCompleted) await task.finish({keep: (await task.pages()).map(page => page.label)});
+            else await task.handOff();
+        }
+        cliLog(JSON.stringify({ok:true}));
+        """)
         if id == spaceID { handedOff = true }
     }
-    /// Focus the existing task Page, then yield it without editing or changing channel outcomes.
+
+    /// Finished tasks lose Page labels. Resolve a unique original URL, never an arbitrary tab.
     public func openChannel(_ platform: PlatformID) async throws {
         guard activeAttempts.isEmpty else { throw EgoBridge.BridgeError.toolFailed("此工作区仍在填写中，请完成后再打开") }
-        guard let id = spaceID, let bridge = bridges[platform] else {
-            throw ChannelNavigationError.pageUnavailable
-        }
-        let label = String(data: try JSONSerialization.data(withJSONObject: [bridge.pageLabel]), encoding: .utf8)!
+        guard let id = spaceID, let bridge = bridges[platform] else { throw ChannelNavigationError.pageUnavailable }
+        let identity = String(data: try JSONSerialization.data(withJSONObject: ["label": bridge.pageLabel,
+            "url": completedPageURLs[bridge.pageLabel] ?? ""]), encoding: .utf8)!
         let result = try await EgoLiteEngine().runRaw(script: """
-        const task = await \(handedOff ? "takeOverTaskSpace" : "taskSpace")(\(id));
+        const info = (await listTaskSpaces()).find(space => space.id === \(id));
+        if (!info) throw new Error("本次任务工作区已不存在");
+        const wasCompleted = info.ownership === "user";
+        const task = await (wasCompleted ? claimTaskSpace : \(handedOff ? "takeOverTaskSpace" : "taskSpace"))(\(id));
+        const identity = \(identity);
         let missing = false;
         let navigationError = null;
         try {
-            const tab = (await task.tabs()).find(tab => tab.label === \(label)[0]);
-            if (!tab) { missing = true; }
+            const tabs = await task.tabs();
+            const matches = \(completed ? "true" : "false")
+                ? tabs.filter(tab => identity.url && tab.url === identity.url)
+                : tabs.filter(tab => tab.label === identity.label);
+            if (matches.length !== 1) { missing = true; }
             else {
-                await task.page(tab.label).cdp("Page.bringToFront");
+                const tab = matches[0];
+                const page = tab.label ? task.page(tab.label) : await task.adopt(tab.page);
+                await page.cdp("Page.bringToFront");
                 const active = (await task.tabs()).find(tab => tab.active);
-                if (active?.label !== tab.label) throw new Error("目标渠道页面未激活");
+                if (active?.targetId !== tab.targetId) throw new Error("目标渠道页面未激活");
             }
         } catch (error) { navigationError = String(error); }
-        finally { await task.handOff(); }
+        finally {
+            if (wasCompleted) await task.finish({keep: (await task.pages()).map(page => page.label)});
+            else await task.handOff();
+        }
         cliLog(JSON.stringify({ok: !missing && !navigationError, missing, navigationError}));
         """)
         handedOff = true
@@ -107,6 +162,7 @@ public final class DispatchService: DispatchServicing {
     }
 
     public func resumeControl() async throws {
+        guard !completed else { throw EgoBridge.BridgeError.toolFailed("此任务已经结束，不能继续填写") }
         guard handedOff, let id = spaceID else { return }
         _ = try await EgoLiteEngine().runRaw(script: "const task = await takeOverTaskSpace(\(id)); cliLog(JSON.stringify({ok:true}));")
         handedOff = false

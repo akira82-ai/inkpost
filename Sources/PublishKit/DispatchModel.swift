@@ -28,10 +28,15 @@ public final class DispatchModel {
     public var platformMessages: [PlatformID: String] = [:]
     public var taskPlatforms: [PlatformID] = []
     public var navigationMessage: String?
-    public var opensWorkspaceAfterMissingPage = false
+    public var canIgnoreWorkspaceError = false
     public var attentionPlatforms: [PlatformID] {
         taskPlatforms.filter { platformPhase[$0] != .awaitingConfirm }
     }
+    public var waitingLoginPlatforms: [PlatformID] {
+        taskPlatforms.filter { platformPhase[$0] == .needLogin }
+    }
+    public var isSettling = false
+    public var hasEnded: Bool { [.awaitingConfirm, .failed, .cancelled].contains(overallPhase) }
     public var isHandingOff = false
     public var history: [DispatchRecord] = []
 

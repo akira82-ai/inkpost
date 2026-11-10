@@ -32,3 +32,34 @@ extension ChannelEventPayload {
         }
     }
 }
+
+/// Presentation only: task phases keep their domain meaning in PublishKit.
+enum ChannelStatusPresentation: CaseIterable {
+    case filling, ready, login, problem
+
+    init(phase: TargetPhase) {
+        switch phase {
+        case .pending, .preparing, .finalizing: self = .filling
+        case .awaitingConfirm, .published: self = .ready
+        case .needLogin: self = .login
+        case .failed, .cancelled: self = .problem
+        }
+    }
+    var title: String {
+        switch self {
+        case .filling: return "填写中"
+        case .ready: return "填写成功"
+        case .login: return "需登录"
+        case .problem: return "其他问题"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .filling: return "arrow.triangle.2.circlepath"
+        case .ready: return "checkmark"
+        case .login: return "rectangle.portrait.and.arrow.right"
+        case .problem: return "exclamationmark.diamond"
+        }
+    }
+    var canOpen: Bool { self == .login || self == .problem }
+}

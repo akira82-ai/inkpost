@@ -79,7 +79,7 @@ struct DispatchControllerTests {
 
     @Test func completionSnapshotPreservesOriginalTaskAndFailureForPresentation() async throws {
         let service = FakeDispatchService()
-        service.statuses = [.jike: "needLogin"]
+        service.statuses = [.jike: "failed"]
         var notices: [DispatchCompletion] = []
         let controller = makeController(service, onCompletion: { notices.append($0) })
         controller.dispatch()
@@ -90,12 +90,12 @@ struct DispatchControllerTests {
         #expect(notice.taskID == taskID)
         #expect(notice.workspaceID == 42)
         #expect(notice.phases[.zhihu] == .awaitingConfirm)
-        #expect(notice.phases[.jike] == .needLogin)
-        #expect(notice.failures[.jike]?.detail == "login")
+        #expect(notice.phases[.jike] == .failed)
+        #expect(notice.failures[.jike]?.detail == "failed")
         controller.reset()
         #expect(notice.taskID == taskID)
         #expect(notice.workspaceID == 42)
-        #expect(notice.failures[.jike]?.detail == "login")
+        #expect(notice.failures[.jike]?.detail == "failed")
     }
 
     @Test func notificationOpensItsOriginalSpaceWithoutResettingCurrentDraft() async {
@@ -152,7 +152,7 @@ struct DispatchControllerTests {
         let controller = makeController(service)
         controller.dispatch()
         try await waitForDispatch(controller)
-        #expect(controller.state.overallPhase == .failed)
+        #expect(controller.state.overallPhase == .needLogin)
         let original = service.requests.last
         let originalBody = service.bodies.last
         let originalAssets = service.assetSnapshots.last
@@ -349,13 +349,13 @@ struct DispatchControllerTests {
         #expect(!controller.state.isHandingOff)
     }
 
-    @Test func singleActionOpensFirstUnfinishedChannelWithoutChangingResults() async throws {
+    @Test func channelIconOpensRequestedChannelWithoutChangingResults() async throws {
         let service = FakeDispatchService()
         service.statuses = [.jike: "needLogin", .x: "failed"]
         let controller = makeController(service)
         controller.dispatch(); try await waitForDispatch(controller)
         let requestCount = service.requests.count
-        controller.openTaskDestination(); controller.openTaskDestination()
+        controller.openChannel(.jike); controller.openChannel(.jike)
         try await waitForNavigation(controller)
         #expect(service.channelOpens == [.jike])
         #expect(controller.state.attentionPlatforms == [.jike, .x])
@@ -366,12 +366,11 @@ struct DispatchControllerTests {
         #expect(service.requests.count == requestCount)
     }
 
-    @Test func missingPageReusesActionForWorkspaceAndRetainsContentOnFailure() async throws {
+    @Test func missingPageReportsErrorAndFinalActionRetriesWorkspace() async throws {
         let service = FakeDispatchService(); service.statuses[.x] = "failed"; service.missingPage = true
         let controller = makeController(service)
         controller.dispatch(); try await waitForDispatch(controller)
-        controller.openTaskDestination(); try await waitForNavigation(controller)
-        #expect(controller.state.opensWorkspaceAfterMissingPage)
+        controller.openChannel(.x); try await waitForNavigation(controller)
         #expect(controller.state.navigationMessage?.contains("X页面不可用") == true)
         #expect(service.notificationSpaces.isEmpty)
         service.handoffFails = true
@@ -381,12 +380,65 @@ struct DispatchControllerTests {
         controller.openTaskDestination(); try await waitForNavigation(controller)
         #expect(service.channelOpens == [.x])
         #expect(service.notificationSpaces == [42, 42])
-        #expect(controller.state.overallPhase == .failed)
-        #expect(controller.state.markdown == "Test **body**")
-        #expect(controller.state.history.isEmpty)
+        #expect(controller.state.overallPhase == .pending)
+        #expect(controller.state.markdown.isEmpty)
+        #expect(controller.state.history.count == 1)
         controller.reset()
-        #expect(!controller.state.opensWorkspaceAfterMissingPage)
         #expect(controller.state.navigationMessage == nil)
+    }
+
+    @Test(arguments: ["awaitingConfirm", "failed", "cancelled"])
+    func acknowledgingWorkspaceErrorClearsDraftWithoutBrowserOperations(_ rawPhase: String) async throws {
+        let phase = try #require(TargetPhase(rawValue: rawPhase))
+        let service = FakeDispatchService()
+        let controller = makeController(service)
+        controller.dispatch(); try await waitForDispatch(controller)
+        controller.state.overallPhase = phase
+        controller.state.assetPaths = ["original.png"]
+        controller.state.assetData = ["original.png": Data([1])]
+        let selection = controller.state.selectedPlatforms
+        service.handoffFails = true
+        controller.openTaskDestination(); try await waitForNavigation(controller)
+        #expect(controller.state.canIgnoreWorkspaceError)
+        #expect(!controller.state.markdown.isEmpty)
+        let browserOpens = service.notificationSpaces
+        let requestCount = service.requests.count
+        controller.ignoreWorkspaceError(); controller.ignoreWorkspaceError()
+        #expect(controller.state.overallPhase == .pending)
+        #expect(controller.state.title.isEmpty && controller.state.markdown.isEmpty)
+        #expect(controller.state.assetPaths.isEmpty && controller.state.assetData.isEmpty)
+        #expect(controller.state.selectedPlatforms == selection)
+        #expect(controller.state.taskID == nil && controller.state.taskPlatforms.isEmpty)
+        #expect(controller.state.platformPhase.values.allSatisfy { $0 == .pending })
+        #expect(controller.state.navigationMessage == nil && !controller.state.canIgnoreWorkspaceError)
+        #expect(controller.state.eventLog.isEmpty)
+        #expect(service.notificationSpaces == browserOpens)
+        #expect(service.requests.count == requestCount)
+        #expect(controller.canDispatch == false)
+        controller.state.markdown = "New draft"
+        #expect(controller.canDispatch)
+    }
+
+    @Test func workspaceAcknowledgementCannotClearActiveOrWaitingTask() {
+        let controller = makeController(FakeDispatchService())
+        for phase in [TargetPhase.pending, .preparing, .needLogin] {
+            controller.state.overallPhase = phase
+            controller.state.canIgnoreWorkspaceError = true
+            controller.ignoreWorkspaceError()
+            #expect(controller.state.markdown == "Test **body**")
+        }
+        controller.state.overallPhase = .awaitingConfirm
+        controller.state.isHandingOff = true
+        controller.ignoreWorkspaceError()
+        #expect(!controller.state.markdown.isEmpty)
+        controller.state.isHandingOff = false
+        controller.state.isSettling = true
+        controller.ignoreWorkspaceError()
+        #expect(!controller.state.markdown.isEmpty)
+        controller.state.isSettling = false
+        controller.state.canIgnoreWorkspaceError = false
+        controller.ignoreWorkspaceError()
+        #expect(!controller.state.markdown.isEmpty)
     }
 
     @Test func navigationBlocksResumeEditAndResetUntilItFinishes() async throws {
@@ -395,10 +447,10 @@ struct DispatchControllerTests {
         controller.dispatch(); try await waitForDispatch(controller)
         let task = controller.state.taskID
         service.pauseNavigation = true
-        controller.openTaskDestination()
+        controller.openChannel(.x)
         controller.resume(.x); controller.editUnfinishedChannels(); controller.reset()
         #expect(controller.state.taskID == task)
-        #expect(controller.state.overallPhase == .failed)
+        #expect(controller.state.overallPhase == .needLogin)
         #expect(controller.state.isHandingOff)
         service.pauseNavigation = false
         try await waitForNavigation(controller)
@@ -410,8 +462,7 @@ struct DispatchControllerTests {
         let service = FakeDispatchService(); service.statuses[.x] = "failed"; service.navigationFailure = true
         let controller = makeController(service)
         controller.dispatch(); try await waitForDispatch(controller)
-        controller.openTaskDestination(); try await waitForNavigation(controller)
-        #expect(!controller.state.opensWorkspaceAfterMissingPage)
+        controller.openChannel(.x); try await waitForNavigation(controller)
         #expect(controller.state.navigationMessage == "未能打开渠道页面，内容已保留，请重试。")
         #expect(controller.state.overallPhase == .failed)
     }
@@ -435,7 +486,7 @@ struct DispatchControllerTests {
         #expect(controller.state.history.count == 1)
     }
 
-    @Test func testFailedHandoffAndPartialTaskKeepContent() async throws {
+    @Test func failedNavigationKeepsContentAndSuccessfulNavigationResetsPartialTask() async throws {
         let service = FakeDispatchService()
         let controller = makeController(service)
         controller.dispatch(); try await waitForDispatch(controller)
@@ -449,9 +500,9 @@ struct DispatchControllerTests {
         service.handoffFails = false
         controller.openWorkspace()
         while controller.state.isHandingOff { try await Task.sleep(for: .milliseconds(1)) }
-        #expect(controller.state.overallPhase == .failed)
-        #expect(controller.state.markdown == "Test **body**")
-        #expect(controller.state.history.isEmpty)
+        #expect(controller.state.overallPhase == .pending)
+        #expect(controller.state.markdown.isEmpty)
+        #expect(controller.state.history.count == 1)
     }
 
 
@@ -488,6 +539,74 @@ struct DispatchControllerTests {
         controller.cancel(); try await waitForDispatch(controller)
         callback(.init(execution: current, payload: .diagnostic("after finish")))
         #expect(!controller.state.eventLog.contains { $0.contains("after finish") })
+    }
+
+    @Test func loginWaitIsNotCompletionAndBatchResumePreservesFinishedChannels() async throws {
+        let service = FakeDispatchService()
+        service.statuses = [.jike: "needLogin", .x: "needLogin"]
+        var notices: [DispatchCompletion] = []
+        let controller = makeController(service, onCompletion: { notices.append($0) })
+        controller.dispatch(); try await waitForDispatch(controller)
+        #expect(controller.state.overallPhase == .needLogin)
+        #expect(service.completionCount == 0)
+        #expect(notices.isEmpty)
+        service.statuses[.jike] = "draftReady"
+        controller.resumeWaitingLogins(); controller.resumeWaitingLogins()
+        try await waitForDispatch(controller)
+        #expect(controller.state.waitingLoginPlatforms == [.x])
+        #expect(service.platforms == [.zhihu, .jike, .x, .jike, .x])
+        #expect(service.completionCount == 0)
+        service.statuses[.x] = "draftReady"
+        controller.resumeWaitingLogins(); try await waitForDispatch(controller)
+        #expect(service.platforms == [.zhihu, .jike, .x, .jike, .x, .x])
+        #expect(service.completionCount == 1)
+        #expect(notices.count == 1)
+        #expect(service.requests.allSatisfy { $0 == service.requests.first })
+    }
+
+    @Test func skipRemainingLoginsFinishesAndFinalActionResetsFailedDraft() async throws {
+        let service = FakeDispatchService(); service.statuses = [.jike: "needLogin", .x: "failed"]
+        let controller = makeController(service)
+        controller.dispatch(); try await waitForDispatch(controller)
+        controller.skipWaitingLogins(); try await waitForDispatch(controller)
+        #expect(controller.state.overallPhase == .failed)
+        #expect(service.completionCount == 1)
+        controller.openTaskDestination(); try await waitForNavigation(controller)
+        #expect(service.channelOpens.isEmpty)
+        #expect(service.notificationSpaces == [42])
+        #expect(controller.state.markdown.isEmpty)
+        #expect(controller.state.history.count == 1)
+    }
+
+    @Test func queuedChannelNavigationWaitsForRemainingAutomaticWork() async throws {
+        let service = FakeDispatchService(); service.statuses[.jike] = "needLogin"; service.pausePlatform = .x
+        let controller = makeController(service)
+        controller.dispatch()
+        while service.platforms.count < 3 { try await Task.sleep(for: .milliseconds(1)) }
+        controller.openChannel(.jike)
+        #expect(service.channelOpens.isEmpty)
+        #expect(controller.state.navigationMessage?.contains("其余渠道") == true)
+        service.pausePlatform = nil
+        try await waitForDispatch(controller); try await waitForNavigation(controller)
+        #expect(service.channelOpens == [.jike])
+        #expect(controller.state.overallPhase == .needLogin)
+        #expect(controller.state.markdown == "Test **body**")
+    }
+
+    @Test func settlementBlocksEditingAndRetainsErrorsWithoutHidingResults() async throws {
+        let service = FakeDispatchService(); service.pauseCompletion = true; service.completionFails = true
+        let controller = makeController(service)
+        controller.dispatch()
+        while !controller.state.isSettling { try await Task.sleep(for: .milliseconds(1)) }
+        let task = controller.state.taskID
+        controller.reset(); controller.openWorkspace(); controller.resumeWaitingLogins()
+        #expect(controller.state.taskID == task)
+        #expect(service.notificationSpaces.isEmpty)
+        service.pauseCompletion = false
+        try await waitForDispatch(controller)
+        #expect(controller.state.overallPhase == .awaitingConfirm)
+        #expect(controller.state.navigationMessage?.contains("未能交还") == true)
+        #expect(!controller.state.markdown.isEmpty)
     }
 
     @Test func testImageBatchReportsAddedDuplicatesAndAllOverflow() throws {
@@ -541,6 +660,14 @@ private final class FakeDispatchService: DispatchServicing {
         if missingPage { throw ChannelNavigationError.pageUnavailable }
         if navigationFailure { throw NSError(domain: "test-navigation", code: 1) }
     }
+    var completionCount = 0
+    var pauseCompletion = false
+    var completionFails = false
+    func completeTask() async throws {
+        completionCount += 1
+        while pauseCompletion { try await Task.sleep(for: .milliseconds(1)) }
+        if completionFails { throw NSError(domain: "test-completion", code: 1) }
+    }
     var handoffCount = 0
     var handoffFails = false
     func handOff() async throws {
@@ -552,6 +679,7 @@ private final class FakeDispatchService: DispatchServicing {
     var verificationFailure: PlatformID?
     var platforms: [PlatformID] = []
     var pause = false
+    var pausePlatform: PlatformID?
     var callbacks: [@MainActor @Sendable (ChannelEvent) -> Void] = []
     var executions: [ChannelExecutionID] = []
     var requests: [ChannelRequest] = []
@@ -566,6 +694,7 @@ private final class FakeDispatchService: DispatchServicing {
         platforms.append(platform); requests.append(request)
         callbacks.append(onEvent); executions.append(execution)
         if pause { try await Task.sleep(for: .seconds(10)) }
+        while pausePlatform == platform { try await Task.sleep(for: .milliseconds(1)) }
         bodies.append(request.body); assetSnapshots.append(request.assets)
         if platform == throwPlatform { throw NSError(domain: "test", code: 1) }
         if platform == verificationFailure {

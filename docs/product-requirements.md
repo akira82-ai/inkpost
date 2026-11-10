@@ -33,7 +33,7 @@
 - Use the native titlebar with title 墨驿, visible standard close/minimize buttons and a disabled gray zoom button; no resizing or fullscreen. Close and minimize both hide the main window without quitting, cancelling, or minimizing to Dock. The right gear opens Settings.
 - Clicking the menu-bar icon shows or brings forward the same main window, including when it is covered by another app or belongs to another desktop; visibility alone must never make a click hide it. Explicit opening brings the window to the current desktop without switching desktops, activates once and focuses the body. Switching apps leaves it visible behind other apps, without raising Settings. Do not provide a Dock entry or depend on Dock reopen for access.
 - Hide automatically once only after valid Start Filling begins execution. Progress, completion, failure, cancellation, login waiting, focus loss and Escape must not change visibility.
-- Main window and Settings share one DispatchController/DispatchModel. Task operations, recovery, errors and logs belong in the main window. NativeMenuBar owns status copy and fixed-size image animation; animation ticks never write title or item length. Window lifecycle remains in Views.
+- Main window and Settings share one DispatchController/DispatchModel. Task operations share the same model; the main window shows concise results and one navigation action, without execution logs or raw errors. NativeMenuBar owns status copy and fixed-size image animation; animation ticks never write title or item length. Window lifecycle remains in Views.
 
 - Product workflow ends at awaitingConfirm (已填好); no product UI for published or receipt tracking. On successful workspace handoff, archive the content, images and Space identity in session history, then reset the editor while retaining channel selection. Failed handoffs and incomplete tasks must retain content. Internal fixture CLI may retain receipt checks.
 - PNG encoding belongs exclusively to AssetService during task preparation, before any adapter/browser execution. DispatchService retains one complete prepared batch per task and passes its source-to-PNG mapping through ChannelExecutionContext while preserving the original ChannelRequest. Adapters upload only those PNG files; adapter-side or clipboard-side format conversion, repair, and fallback to originals are forbidden. Resume reuses the same batch; release it only after no invocation can use it. Reject unsupported animated/multiframe assets explicitly, never silently flatten them.
@@ -73,3 +73,11 @@
 ## Juejin pins channel
 
 - Read [Juejin adapter maintenance](../Sources/PublishKit/Services/Channels/JuejinChannelAdapter.md) before changing it. Ordinary pins only; title is optionally prepended with one newline, composed text at most 1000 UTF-16 units. First filling clears old body/attachments as authorized; resume must never clear again. Preserve raw editor input; the website itself trims edge whitespace on submission. Attachments are staged locally and uploaded only by the user’s final Publish action; verify all staged images without claiming remote upload.
+
+## 异常结果展示与导航（#47）
+
+- 主窗口任务结果区只保留一个前往按钮和静态结果说明，不展示执行日志、原始技术报错、渠道重试按钮、重复渠道卡片或修改未完成内容入口。执行中的停止填写能力保留。
+- 有异常时按钮为「前往处理」，说明如「4 个已填好 · 微博需处理」；多个异常列出名称，全部需处理时汇总数量。全部已填好时保留「已完成，前往发布」，最终发布仍由用户手工操作。
+- 前往处理优先定位本任务按任务顺序第一个未完成渠道的原 Page；其他渠道在同一个 ego 工作区切换。导航不重新填写、不新建渠道页面、不修改真实渠道结果，不清空未完成稿。
+- 原 Page 不可用时给出短提示，同一个按钮改为「打开工作区」；打开失败保留内容和入口，不静默跳首页。执行或交还中不并发开启导航、恢复、重置或编辑未完成任务。
+- 日志仍保留在内部诊断数据中，移除界面展示不等于吞掉执行错误。恢复自动填写的后续交互不在本项重新设计。

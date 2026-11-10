@@ -6,7 +6,6 @@ struct CompactView: View {
     @Bindable var model: DispatchModel
     let controller: DispatchController
     let presentation: TaskPresentation
-    @State private var showExecutionLog = false
     @State private var mainWindow: NSWindow?
     var body: some View {
         composer
@@ -38,29 +37,9 @@ struct CompactView: View {
                 if model.overallPhase == .preparing {
                     Button("停止填写", action: controller.cancel).buttonStyle(.plain).font(InkStyle.font(11))
                 }
-                ForEach(model.taskPlatforms) { platform in
-                    if let outcome = model.platformOutcomes[platform], let failure = outcome.failure {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text("\(platform.title)：\(model.platformMessages[platform] ?? failure.detail)")
-                                .textSelection(.enabled)
-                            if outcome.canResume {
-                                Button(failure.recovery.actionTitle) { controller.resume(platform) }
-                                    .disabled(model.overallPhase == .preparing)
-                            }
-                        }.font(InkStyle.font(11)).frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                if [.failed, .cancelled].contains(model.overallPhase) {
-                    Button("修改未完成渠道的内容", action: controller.editUnfinishedChannels).buttonStyle(.plain).font(InkStyle.font(11))
-                }
-                if !model.eventLog.isEmpty {
-                    DisclosureGroup("执行日志（\(model.eventLog.count) 条）", isExpanded: $showExecutionLog) {
-                        ScrollView {
-                            Text(model.eventLog.joined(separator: "\n")).textSelection(.enabled)
-                                .font(.system(size: 10, design: .monospaced))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }.frame(height: 120)
-                    }.font(InkStyle.font(11))
+                if let message = model.navigationMessage {
+                    Text(message).font(InkStyle.font(10)).foregroundStyle(Color(hex: 0x8B542B))
+                        .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
                 }
             }.padding(.top, 11).padding(.horizontal, 18).padding(.bottom, 15)
         }.fixedSize(horizontal: false, vertical: true)

@@ -80,6 +80,17 @@ swift test --no-parallel \
 - 保留完整请求交付、校验、成功、等待人工、结构化失败与恢复、取消和过期结果拒绝的契约覆盖；渠道行为通过真实适配器验证，避免只测替身服务。
 - 验证实际后置条件，不能把已发出操作当作成功；不把提示词限制声称为可强制执行的安全边界。
 
+## 异常结果展示与导航（#47，2026-11-10）
+
+- 0.15.0 提交复核：106 tests / 21 suites 串行通过（130.178 秒）；启用本地 ego fixture 的导航专项 1 test / 1 suite 通过（4.124 秒），覆盖原 Page 激活、缺失反馈和工作区打开。compact-smoke、原型 JavaScript 与打包脚本语法、差异检查、正式签名 release 构建与启动通过；DMG 完整性、ZIP 解压验签、版本及 SHA256 校验通过。正式应用内结果按钮到浏览器的完整点击链路尚未验收，#47 保持开启。
+
+- 主窗口结果区复用 DispatchAction/DispatchStatus，仅保留一个前往按钮和静态汇总；不再呈现渠道错误卡、重试入口、修改未完成内容入口及执行日志。内部事件、结构化错误与诊断日志继续保留。
+- DispatchController 按任务顺序选择第一个未完成渠道；DispatchService 定位已有 Space/Page，以 `Page.bringToFront` 激活后交还控制权，不执行编辑或创建页面。缺失 Page 显示简短提示，同一按钮切换为打开工作区；其他导航错误保留重试入口。导航期间阻止重复点击、恢复及重置。
+- 已填好任务沿用成功交接后归档和清空编辑器的既有行为；异常导航不改变渠道结果或清空稿件。本项没有重新设计恢复自动填写与动效生命周期。
+- 全量串行测试 106 tests / 21 suites 通过（129.705 秒）；专项 34 tests / 3 suites 通过，包含真实 ego 本地 fixture 页面切换、关闭目标 Page 后的缺失报告和工作区入口，不涉及真实社媒发布。原生 NSHostingView 对失败、已填好、取消三种状态的尺寸与截图检查通过；真实平台 live 测试未启用。
+- release 构建通过；正式身份 Inkpost（SHA-1 `4E15EF1D792EBC692CD2DE06AFC4F242B35D5A99`）strict/deep 验签通过，新应用 `.build/Inkpost-Compact.app` 已启动，检查时 PID 21516。旧包由项目打包脚本保留在 `.build/inkpost-previous.IaPtoV/Inkpost-Compact.app`。未在正式应用中运行真实渠道任务，不能将分层验证视为真实社媒全流程验收。
+- 默认旧构建缓存带有历史项目路径，测试和构建分别使用 `.build/issue47-tests`、`.build/issue47-release`，未清除其他缓存。
+
 ## 原型交付规范
 
 - Organize HTML prototypes vertically into three sections in this order:

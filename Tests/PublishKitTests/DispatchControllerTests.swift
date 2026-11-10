@@ -343,6 +343,79 @@ struct DispatchControllerTests {
         #expect(controller.state.overallPhase == .pending)
     }
 
+    private func waitForNavigation(_ controller: DispatchController) async throws {
+        let deadline = Date().addingTimeInterval(3)
+        while controller.state.isHandingOff && Date() < deadline { try await Task.sleep(for: .milliseconds(1)) }
+        #expect(!controller.state.isHandingOff)
+    }
+
+    @Test func singleActionOpensFirstUnfinishedChannelWithoutChangingResults() async throws {
+        let service = FakeDispatchService()
+        service.statuses = [.jike: "needLogin", .x: "failed"]
+        let controller = makeController(service)
+        controller.dispatch(); try await waitForDispatch(controller)
+        let requestCount = service.requests.count
+        controller.openTaskDestination(); controller.openTaskDestination()
+        try await waitForNavigation(controller)
+        #expect(service.channelOpens == [.jike])
+        #expect(controller.state.attentionPlatforms == [.jike, .x])
+        #expect(controller.state.platformPhase[.zhihu] == .awaitingConfirm)
+        #expect(controller.state.platformPhase[.jike] == .needLogin)
+        #expect(controller.state.markdown == "Test **body**")
+        #expect(controller.state.history.isEmpty)
+        #expect(service.requests.count == requestCount)
+    }
+
+    @Test func missingPageReusesActionForWorkspaceAndRetainsContentOnFailure() async throws {
+        let service = FakeDispatchService(); service.statuses[.x] = "failed"; service.missingPage = true
+        let controller = makeController(service)
+        controller.dispatch(); try await waitForDispatch(controller)
+        controller.openTaskDestination(); try await waitForNavigation(controller)
+        #expect(controller.state.opensWorkspaceAfterMissingPage)
+        #expect(controller.state.navigationMessage?.contains("X页面不可用") == true)
+        #expect(service.notificationSpaces.isEmpty)
+        service.handoffFails = true
+        controller.openTaskDestination(); try await waitForNavigation(controller)
+        #expect(controller.state.navigationMessage?.contains("未能打开工作区") == true)
+        service.handoffFails = false
+        controller.openTaskDestination(); try await waitForNavigation(controller)
+        #expect(service.channelOpens == [.x])
+        #expect(service.notificationSpaces == [42, 42])
+        #expect(controller.state.overallPhase == .failed)
+        #expect(controller.state.markdown == "Test **body**")
+        #expect(controller.state.history.isEmpty)
+        controller.reset()
+        #expect(!controller.state.opensWorkspaceAfterMissingPage)
+        #expect(controller.state.navigationMessage == nil)
+    }
+
+    @Test func navigationBlocksResumeEditAndResetUntilItFinishes() async throws {
+        let service = FakeDispatchService(); service.statuses[.x] = "needLogin"
+        let controller = makeController(service)
+        controller.dispatch(); try await waitForDispatch(controller)
+        let task = controller.state.taskID
+        service.pauseNavigation = true
+        controller.openTaskDestination()
+        controller.resume(.x); controller.editUnfinishedChannels(); controller.reset()
+        #expect(controller.state.taskID == task)
+        #expect(controller.state.overallPhase == .failed)
+        #expect(controller.state.isHandingOff)
+        service.pauseNavigation = false
+        try await waitForNavigation(controller)
+        #expect(service.requests.count == 3)
+        #expect(service.channelOpens == [.x])
+    }
+
+    @Test func navigationErrorDoesNotPretendPageIsMissingOrExposeRawError() async throws {
+        let service = FakeDispatchService(); service.statuses[.x] = "failed"; service.navigationFailure = true
+        let controller = makeController(service)
+        controller.dispatch(); try await waitForDispatch(controller)
+        controller.openTaskDestination(); try await waitForNavigation(controller)
+        #expect(!controller.state.opensWorkspaceAfterMissingPage)
+        #expect(controller.state.navigationMessage == "未能打开渠道页面，内容已保留，请重试。")
+        #expect(controller.state.overallPhase == .failed)
+    }
+
     @Test func testSuccessfulHandoffArchivesAndClearsOnlyCompletedDraft() async throws {
         let service = FakeDispatchService()
         let controller = makeController(service)
@@ -456,7 +529,17 @@ private final class FakeDispatchService: DispatchServicing {
     var notificationSpaces: [Int] = []
     func openWorkspace(id: Int) async throws {
         notificationSpaces.append(id)
-        if handoffFails { throw NSError(domain: "test-notification", code: 1) }
+        try await handOff()
+    }
+    var channelOpens: [PlatformID] = []
+    var missingPage = false
+    var pauseNavigation = false
+    var navigationFailure = false
+    func openChannel(_ platform: PlatformID) async throws {
+        channelOpens.append(platform)
+        while pauseNavigation { try await Task.sleep(for: .milliseconds(1)) }
+        if missingPage { throw ChannelNavigationError.pageUnavailable }
+        if navigationFailure { throw NSError(domain: "test-navigation", code: 1) }
     }
     var handoffCount = 0
     var handoffFails = false

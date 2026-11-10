@@ -83,24 +83,61 @@ public final class DispatchController {
         // Removing an earlier source shifts the target one slot to the left.
         state.assetPaths.insert(path, at: from < to ? to - 1 : to)
     }
+    /// The sole result action prefers the first unfinished channel. A missing Page exposes
+    /// workspace navigation on the same button, without treating navigation as successful filling.
+    public func openTaskDestination() {
+        guard state.overallPhase != .pending, state.overallPhase != .preparing, !state.isHandingOff else { return }
+        guard !state.opensWorkspaceAfterMissingPage, let platform = state.attentionPlatforms.first else {
+            openWorkspace()
+            return
+        }
+        state.isHandingOff = true
+        state.navigationMessage = nil
+        let token = generation
+        Task {
+            defer { if generation == token { state.isHandingOff = false } }
+            do {
+                try await service.openChannel(platform)
+            } catch {
+                guard generation == token else { return }
+                if case ChannelNavigationError.pageUnavailable = error {
+                    state.opensWorkspaceAfterMissingPage = true
+                    state.navigationMessage = "\(platform.title)页面不可用，请打开工作区查看。"
+                } else {
+                    state.navigationMessage = "未能打开渠道页面，内容已保留，请重试。"
+                }
+                log(error.localizedDescription)
+            }
+        }
+    }
+
     public func openWorkspace() {
         guard state.overallPhase != .preparing, !state.isHandingOff else { return }
         state.isHandingOff = true
         let completed = state.overallPhase == .awaitingConfirm
+        let token = generation
+        state.navigationMessage = nil
         Task {
-            defer { state.isHandingOff = false }
+            defer { if generation == token { state.isHandingOff = false } }
             do {
-                try await service.handOff()
+                if let id = service.workspaceID { try await service.openWorkspace(id: id) }
+                else { try await service.handOff() }
+                guard generation == token else { return }
                 if completed {
                     state.history.insert(DispatchRecord(title: state.title, markdown: state.markdown,
                         platforms: state.taskPlatforms, assetPaths: state.assetPaths,
                         assetData: state.assetData, workspaceID: service.workspaceID), at: 0)
+                    state.isHandingOff = false
                     newDraft()
                     state.eventLog = []
                     state.platformPhase = [:]
                     state.notice = "上一份已交接，可以开始新一份内容"
                 }
-            } catch { state.notice = "未能打开工作区，内容已保留，请重试"; log(error.localizedDescription) }
+            } catch {
+                guard generation == token else { return }
+                state.navigationMessage = "未能打开工作区，内容已保留，请重试。"
+                log(error.localizedDescription)
+            }
         }
     }
     /// Notification navigation does not archive/reset content or alter another task's state.
@@ -119,7 +156,7 @@ public final class DispatchController {
         }
     }
     public func resume(_ platform: PlatformID) {
-        guard state.overallPhase != .preparing, state.platformOutcomes[platform]?.canResume == true, draftRequest != nil else { return }
+        guard !state.isHandingOff, state.overallPhase != .preparing, state.platformOutcomes[platform]?.canResume == true, draftRequest != nil else { return }
         state.overallPhase = .preparing
         let token = generation
         runningTask = Task {
@@ -250,7 +287,7 @@ public final class DispatchController {
     }
 
     public func editUnfinishedChannels() {
-        guard [.failed, .cancelled].contains(state.overallPhase) else { return }
+        guard !state.isHandingOff, [.failed, .cancelled].contains(state.overallPhase) else { return }
         let unfinished = state.taskPlatforms.filter { state.platformPhase[$0] != .awaitingConfirm }
         reset()
         state.selectedPlatforms = unfinished
@@ -262,7 +299,7 @@ public final class DispatchController {
         state.assetPaths = []; state.assetData = [:]
     }
     public func reset() {
-        guard state.overallPhase != .preparing else { return }
+        guard state.overallPhase != .preparing, !state.isHandingOff else { return }
         generation = UUID()
         runningTask?.cancel()
         state.currentPlatform = nil
@@ -274,6 +311,8 @@ public final class DispatchController {
         draftRequest = nil
         state.overallPhase = .pending
         state.errorMessage = nil
+        state.navigationMessage = nil
+        state.opensWorkspaceAfterMissingPage = false
         for p in state.selectedPlatforms { state.platformPhase[p] = .pending }
     }
 }

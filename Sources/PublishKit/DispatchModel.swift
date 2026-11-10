@@ -27,6 +27,11 @@ public final class DispatchModel {
     public var platformEvents: [PlatformID: ChannelEvent] = [:]
     public var platformMessages: [PlatformID: String] = [:]
     public var taskPlatforms: [PlatformID] = []
+    public var navigationMessage: String?
+    public var opensWorkspaceAfterMissingPage = false
+    public var attentionPlatforms: [PlatformID] {
+        taskPlatforms.filter { platformPhase[$0] != .awaitingConfirm }
+    }
     public var isHandingOff = false
     public var history: [DispatchRecord] = []
 

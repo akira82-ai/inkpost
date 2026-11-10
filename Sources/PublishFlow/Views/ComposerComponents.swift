@@ -361,6 +361,8 @@ struct DispatchAction: View {
     @State private var pulse = false
     private var filling: Bool { model.overallPhase == .preparing }
     private var title: String {
+        if model.isHandingOff { return "正在打开…" }
+        if model.opensWorkspaceAfterMissingPage { return "打开工作区 ↗" }
         switch model.overallPhase {
         case .pending: return "开始填写"
         case .preparing: return "正在填写 · \(model.currentPlatform?.title ?? "所选渠道")"
@@ -396,7 +398,7 @@ struct DispatchAction: View {
             .accessibilityLabel(title)
     }
     private func act() {
-        guard model.overallPhase == .pending else { controller.openWorkspace(); return }
+        guard model.overallPhase == .pending else { controller.openTaskDestination(); return }
         guard controller.canDispatch else { model.notice = "请填写正文并至少选择一个渠道；标题和图片可不填"; return }
         controller.dispatch()
     }
@@ -411,12 +413,15 @@ struct DispatchStatus: View {
         case .preparing:
             let index = model.currentPlatform.flatMap { model.taskPlatforms.firstIndex(of: $0) }.map { $0 + 1 } ?? 0
             return "正在填写 \(index)/\(model.taskPlatforms.count) 个渠道，可以先忙别的，完成后我会提醒你"
-        case .cancelled:
-            return "已停止填写，内容已保留。正在执行的浏览器操作可能已完成，请先检查页面。"
         case .awaitingConfirm:
-            return "请在各渠道确认内容并手动发布。"
+            return "\(model.taskPlatforms.count) 个渠道已填好，请确认后手工发布。"
         default:
-            return "部分渠道遇到问题，需要您前往浏览器手工处理。已填好的内容会保留，处理后可继续。"
+            let attention = model.attentionPlatforms
+            let readyCount = model.taskPlatforms.count - attention.count
+            if model.overallPhase == .cancelled { return "已停止填写，内容已保留，请检查页面。" }
+            guard !attention.isEmpty else { return "填写已结束，请检查页面。" }
+            if readyCount == 0 { return "\(attention.count) 个渠道需处理" }
+            return "\(readyCount) 个已填好 · \(attention.map(\.title).joined(separator: "、"))需处理"
         }
     }
     var body: some View {

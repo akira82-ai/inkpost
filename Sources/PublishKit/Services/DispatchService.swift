@@ -10,9 +10,18 @@ public protocol DispatchServicing {
     func handOff() async throws
     func resumeControl() async throws
     func openWorkspace(id: Int) async throws
+    func openChannel(_ platform: PlatformID) async throws
+}
+
+public enum ChannelNavigationError: Error, Equatable {
+    case pageUnavailable
 }
 
 public extension DispatchServicing {
+    func openChannel(_ platform: PlatformID) async throws {
+        throw ChannelNavigationError.pageUnavailable
+    }
+
     func openWorkspace(id: Int) async throws {
         guard workspaceID == id else { throw EgoBridge.BridgeError.toolFailed("通知对应的工作区无法打开") }
         try await handOff()
@@ -68,6 +77,35 @@ public final class DispatchService: DispatchServicing {
         _ = try await EgoLiteEngine().runRaw(script: "const task = await takeOverTaskSpace(\(id)); await task.handOff(); cliLog(JSON.stringify({ok:true}));")
         if id == spaceID { handedOff = true }
     }
+    /// Focus the existing task Page, then yield it without editing or changing channel outcomes.
+    public func openChannel(_ platform: PlatformID) async throws {
+        guard activeAttempts.isEmpty else { throw EgoBridge.BridgeError.toolFailed("此工作区仍在填写中，请完成后再打开") }
+        guard let id = spaceID, let bridge = bridges[platform] else {
+            throw ChannelNavigationError.pageUnavailable
+        }
+        let label = String(data: try JSONSerialization.data(withJSONObject: [bridge.pageLabel]), encoding: .utf8)!
+        let result = try await EgoLiteEngine().runRaw(script: """
+        const task = await \(handedOff ? "takeOverTaskSpace" : "taskSpace")(\(id));
+        let missing = false;
+        let navigationError = null;
+        try {
+            const tab = (await task.tabs()).find(tab => tab.label === \(label)[0]);
+            if (!tab) { missing = true; }
+            else {
+                await task.page(tab.label).cdp("Page.bringToFront");
+                const active = (await task.tabs()).find(tab => tab.active);
+                if (active?.label !== tab.label) throw new Error("目标渠道页面未激活");
+            }
+        } catch (error) { navigationError = String(error); }
+        finally { await task.handOff(); }
+        cliLog(JSON.stringify({ok: !missing && !navigationError, missing, navigationError}));
+        """)
+        handedOff = true
+        if result.bool("missing") == true { throw ChannelNavigationError.pageUnavailable }
+        if let error = result.string("navigationError") { throw EgoBridge.BridgeError.toolFailed(error) }
+        guard result.bool("ok") == true else { throw EgoBridge.BridgeError.noResult(result.rawOutput) }
+    }
+
     public func resumeControl() async throws {
         guard handedOff, let id = spaceID else { return }
         _ = try await EgoLiteEngine().runRaw(script: "const task = await takeOverTaskSpace(\(id)); cliLog(JSON.stringify({ok:true}));")

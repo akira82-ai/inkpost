@@ -10,7 +10,7 @@ struct ChannelAdapterTests {
     private func bridge() throws -> EgoBridge { try EgoBridge(spaceName: "fake", engine: EgoLiteEngine(binaryPath: "/usr/bin/false")) }
 
     @Test func reorderedAssetsReachAdaptersAndPreparedUploadsWithoutCropping() async throws {
-        let adapters = [PlatformID.zhihu, .jike, .x, .weibo, .juejin, .xiaohongshu].map {
+        let adapters = [PlatformID.zhihu, .jike, .x, .weibo, .juejin, .bilibili, .xiaohongshu].map {
             RecordingAdapter(platform: $0, maximumImages: 6)
         }
         let service = DispatchService(registryFactory: { .init(adapters) }, bridgeFactory: { _ in try bridge() })

@@ -12,7 +12,7 @@ fi
 swift build -c "$CONFIG" --scratch-path "$SCRATCH"
 BIN_DIR="$(swift build -c "$CONFIG" --scratch-path "$SCRATCH" --show-bin-path)"
 APP="${INKPOST_APP_OUTPUT:-.build/Inkpost-Compact.app}"
-VERSION="${INKPOST_APP_VERSION:-0.17.0}"
+VERSION="${INKPOST_APP_VERSION:-0.18.0}"
 BUILD_VERSION="${INKPOST_BUILD_VERSION:-$VERSION}"
 [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ && "$BUILD_VERSION" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] || { echo "Invalid app/build version" >&2; exit 1; }
 # Do not overwrite the running executable/resources before the replacement has passed signing.
@@ -33,7 +33,7 @@ cat > "$STAGED_APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIconFile</key><string>Inkpost.icns</string>
 <key>CFBundleExecutable</key><string>PublishFlow</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.17.0</string>
+<key>CFBundleShortVersionString</key><string>0.18.0</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 <key>LSUIElement</key><true/>
 <key>LSMinimumSystemVersion</key><string>14.0</string>

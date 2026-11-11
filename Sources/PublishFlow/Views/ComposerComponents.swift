@@ -304,19 +304,20 @@ struct ChannelPresentation: Identifiable {
     let badge: String
     let tone: UInt32
     var available: Bool { platform?.isAvailable == true }
-    static let all: [Self] = [
-        .init(id: "zhihu", platform: .zhihu, name: "知乎", badge: "知", tone: 0x3C78B6),
-        .init(id: "jike", platform: .jike, name: "即刻", badge: "即", tone: 0xC6A344),
-        .init(id: "x", platform: .x, name: "X", badge: "𝕏", tone: 0x31332F),
-        .init(id: "weibo", platform: .weibo, name: "微博", badge: "微", tone: 0xD85B43),
-        .init(id: "juejin", platform: .juejin, name: "掘金沸点", badge: "掘", tone: 0x1E80FF),
-        .init(id: "xiaohongshu", platform: .xiaohongshu, name: "小红书", badge: "红", tone: 0xBF6256),
-        .init(id: "threads", platform: nil, name: "Threads", badge: "@", tone: 0x44473F),
-        .init(id: "linkedin", platform: nil, name: "LinkedIn", badge: "in", tone: 0x3776A1),
-        .init(id: "medium", platform: nil, name: "Medium", badge: "M", tone: 0x43473D),
-        .init(id: "bluesky", platform: nil, name: "Bluesky", badge: "B", tone: 0x4B8FCB),
-        .init(id: "instagram", platform: nil, name: "Instagram", badge: "◎", tone: 0xAF637C)
-    ]
+    static let all: [Self] = {
+        let styled: [Self] = [
+            .init(id: "zhihu", platform: .zhihu, name: "知乎", badge: "知", tone: 0x3C78B6),
+            .init(id: "jike", platform: .jike, name: "即刻", badge: "即", tone: 0xC6A344),
+            .init(id: "x", platform: .x, name: "X", badge: "𝕏", tone: 0x31332F),
+            .init(id: "weibo", platform: .weibo, name: "微博", badge: "微", tone: 0xD85B43),
+            .init(id: "juejin", platform: .juejin, name: "掘金沸点", badge: "掘", tone: 0x1E80FF),
+            .init(id: "bilibili", platform: .bilibili, name: "B站动态", badge: "B", tone: 0x1682A6)
+        ]
+        let styledPlatforms = Set(styled.compactMap(\.platform))
+        return styled + PlatformID.allCases.filter { $0 != .simFixture && !styledPlatforms.contains($0) }.map {
+            Self(id: $0.id, platform: $0, name: $0.title, badge: String($0.title.prefix(1)), tone: 0x44473F)
+        }
+    }()
     @MainActor func isSelected(in model: DispatchModel) -> Bool { platform.map { model.selectedPlatforms.contains($0) } ?? false }
 }
 struct ChannelBadge: View {

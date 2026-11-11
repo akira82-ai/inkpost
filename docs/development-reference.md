@@ -156,3 +156,13 @@ swift test --no-parallel \
 - On an unexpected page or missing capability, preserve content, report the failing step and concrete error, and diagnose before changing the workflow. Log navigation destinations and tool errors without credentials or sensitive clipboard contents.
 
 - 0.14.2 提交复核：swift build、84 项串行测试（17 个套件）、compact-smoke、两个原型 JavaScript 与打包脚本语法、签名 release 构建及启动、DMG/ZIP 完整性与解压签名通过；新版主窗口正常响应且正文获焦。跨桌面、全屏、多显示器及系统菜单栏/Dock 视觉检查仍待现场验收。
+
+## B站普通图文动态（#29，2026-11-10）
+
+- 新增独立 BilibiliChannelAdapter 和平台注册，复用原有分发、任务快照、PNG 素材、剪贴板租约与收尾逻辑。界面按注册表显示 B站动态，未增加平台专属协调分支。
+- 已按真实网页验证点击输入框后原生粘贴、选填标题、正文段落及两张有序 PNG。适配器回读标题、正文和图片状态，同页恢复不重复填写；首次填写前清空旧标题、正文和图片；清空不成功则停止填写，恢复时不重复清空。详见 [适配器维护](../Sources/PublishKit/Services/Channels/BilibiliChannelAdapter.md)。
+- B站粘贴会处理首尾空白。真实测试确认原文不一致时抛出 verificationFailed；未通过 trim 弱化校验。标题实际 maxlength=20，按 UTF-16 校验，不截断。未断言未实测的正文、图片上限。
+- 专项离线测试通过：原始字段/标题限制，以及 16 种参数化工作流场景。真实 Swift 适配器 liveDynamicWithoutPublishing 通过（16.154 秒），覆盖无标题无图、多段落/空行/emoji、标题加两张测试图、同页恢复、平台处理首尾空白时失败且不重复粘贴。日志 `/tmp/inkpost29-tests.log`、`/tmp/inkpost29-live.log`。
+- 测试页仅使用纯色 PNG，测试标题、正文和图片已清理，测试 Space 已 finish；全程没有点击发布。未实测退出登录、登录过期、断网、六图极限、账号限制或正式应用整条分发交接链路；离线故障覆盖不能替代这些现场验收。
+- 全量串行回归 124 tests / 23 suites 通过（175.138 秒），日志 `/tmp/inkpost29-regression.log`；测试构建与 `git diff --check` 通过。
+- 0.18.0 交付复核：124 项串行测试、23 个套件通过（184.715 秒）；本地 compact-smoke、差异与打包脚本语法检查通过。仅打包模式生成正式签名应用、DMG、ZIP 和签名 appcast；版本、解压签名和 SHA256 校验通过。未替换当前运行的应用。

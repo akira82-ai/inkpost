@@ -121,8 +121,8 @@ public final class DispatchController {
         Task {
             defer { if generation == token { state.isHandingOff = false } }
             do {
-                if let id = service.workspaceID { try await service.openWorkspace(id: id) }
-                else { try await service.handOff() }
+                // Final acknowledgement only activates ego, even if setup failed before a Space was captured.
+                try await service.openWorkspace(id: service.workspaceID ?? 0)
                 guard generation == token else { return }
                 if completed {
                     state.history.insert(DispatchRecord(title: state.title, markdown: state.markdown,
@@ -136,7 +136,7 @@ public final class DispatchController {
                 }
             } catch {
                 guard generation == token else { return }
-                state.navigationMessage = "未能打开工作区，内容已保留，请重试。"
+                state.navigationMessage = "未能激活 ego，内容已保留，请重试。"
                 state.canIgnoreWorkspaceError = true
                 log(error.localizedDescription)
             }
@@ -152,7 +152,7 @@ public final class DispatchController {
     }
     /// Notification navigation does not archive/reset content or alter another task's state.
     public func openNotificationWorkspace(taskID: UUID, workspaceID: Int) async {
-        guard workspaceID > 0 else { state.notice = "通知中的工作区无效"; return }
+        guard workspaceID >= 0 else { state.notice = "通知中的工作区无效"; return }
         guard taskID != state.taskID || state.overallPhase != .preparing else {
             state.notice = "此任务仍在填写中，请完成后再打开工作区"
             return
@@ -161,7 +161,7 @@ public final class DispatchController {
         defer { openingNotificationSpaces.remove(workspaceID) }
         do { try await service.openWorkspace(id: workspaceID) }
         catch {
-            state.notice = "未能打开通知对应的工作区，内容已保留，请重试"
+            state.notice = "未能激活 ego，内容已保留，请重试"
             log("通知工作区 \(workspaceID)：\(error.localizedDescription)")
         }
     }

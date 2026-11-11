@@ -389,7 +389,7 @@ struct DispatchControllerTests {
         #expect(service.notificationSpaces.isEmpty)
         service.handoffFails = true
         controller.openTaskDestination(); try await waitForNavigation(controller)
-        #expect(controller.state.navigationMessage?.contains("未能打开工作区") == true)
+        #expect(controller.state.navigationMessage?.contains("未能激活 ego") == true)
         service.handoffFails = false
         controller.openTaskDestination(); try await waitForNavigation(controller)
         #expect(service.channelOpens == [.x])
@@ -517,6 +517,62 @@ struct DispatchControllerTests {
         #expect(controller.state.overallPhase == .pending)
         #expect(controller.state.markdown.isEmpty)
         #expect(controller.state.history.count == 1)
+    }
+
+    @Test func defaultSpaceZeroSupportsCompletionNotificationAndFinalActivation() async throws {
+        let service = FakeDispatchService()
+        service.workspaceID = 0
+        let controller = makeController(service)
+        controller.dispatch(); try await waitForDispatch(controller)
+        let content = CompletionNotifier.content(message: "Done", title: "Inkpost", taskID: controller.state.taskID, workspaceID: 0)
+        #expect(content.userInfo[CompletionNotifier.workspaceIDKey] as? Int == 0)
+        controller.openWorkspace(); try await waitForNavigation(controller)
+        #expect(service.notificationSpaces == [0])
+        #expect(controller.state.overallPhase == .pending)
+    }
+
+    @Test func finalNavigationWaitsForConfirmedBrowserActivation() async throws {
+        let service = FakeDispatchService()
+        let controller = makeController(service)
+        controller.dispatch(); try await waitForDispatch(controller)
+        service.pauseWorkspaceNavigation = true
+        controller.openWorkspace()
+        try await Task.sleep(for: .milliseconds(10))
+        #expect(controller.state.isHandingOff)
+        #expect(controller.state.markdown == "Test **body**")
+        #expect(controller.state.history.isEmpty)
+        service.pauseWorkspaceNavigation = false
+        try await waitForNavigation(controller)
+        #expect(controller.state.overallPhase == .pending)
+        #expect(controller.state.history.count == 1)
+    }
+
+    @Test func failedBrowserActivationPreservesDraftAndAllowsRetry() async throws {
+        let service = FakeDispatchService()
+        let controller = makeController(service)
+        controller.dispatch(); try await waitForDispatch(controller)
+        service.workspaceError = WorkspaceNavigationError.failed("ego activation failed")
+        controller.openWorkspace(); try await waitForNavigation(controller)
+        #expect(controller.state.title == "Test title")
+        #expect(controller.state.markdown == "Test **body**")
+        #expect(controller.state.history.isEmpty)
+        #expect(controller.state.canIgnoreWorkspaceError)
+        #expect(controller.state.navigationMessage?.contains("内容已保留") == true)
+        service.workspaceError = nil
+        controller.openWorkspace(); try await waitForNavigation(controller)
+        #expect(controller.state.overallPhase == .pending)
+    }
+
+    @Test func finalActivationDoesNotRequireCapturedSpace() async throws {
+        let service = FakeDispatchService()
+        let controller = makeController(service)
+        controller.dispatch(); try await waitForDispatch(controller)
+        service.workspaceID = nil
+        controller.openWorkspace(); try await waitForNavigation(controller)
+        #expect(controller.state.markdown.isEmpty)
+        #expect(controller.state.history.count == 1)
+        #expect(controller.state.history.first?.workspaceID == nil)
+        #expect(service.notificationSpaces == [0])
     }
 
 
@@ -658,10 +714,14 @@ struct DispatchControllerTests {
 
 @MainActor
 private final class FakeDispatchService: DispatchServicing {
-    var workspaceID: Int? { 42 }
+    var workspaceID: Int? = 42
     var notificationSpaces: [Int] = []
+    var pauseWorkspaceNavigation = false
+    var workspaceError: Error?
     func openWorkspace(id: Int) async throws {
         notificationSpaces.append(id)
+        while pauseWorkspaceNavigation { try await Task.sleep(for: .milliseconds(1)) }
+        if let workspaceError { throw workspaceError }
         try await handOff()
     }
     var channelOpens: [PlatformID] = []

@@ -39,7 +39,6 @@ public final class DispatchService: DispatchServicing {
     private var sessions: [PlatformID: (request: ChannelRequest, outcome: ChannelOutcome)] = [:]
     private var activeAttempts: [PlatformID: UUID] = [:]
     private var bridges: [PlatformID: EgoBridge] = [:]
-    private var spaceName = ""
     private var spaceID: Int?
     private var handedOff = false
     private var completed = false
@@ -59,9 +58,17 @@ public final class DispatchService: DispatchServicing {
         assetPreparation?.cancel()
         assetPreparation = nil; taskRequest = nil
         taskID = id; sessions = [:]
-        spaceName = "inkpost \(UUID().uuidString)"
         bridges = [:]; spaceID = nil; handedOff = false; completed = false; completedPageURLs = [:]
         registry = makeRegistry()
+        if bridgeFactory == nil {
+            let window = try await EgoWorkspaceNavigator.currentWindow()
+            let script = try EgoWorkspaceNavigator.claimCurrentSpaceScript(windowID: window.id, title: window.title)
+            let result = try await EgoLiteEngine().runRaw(script: script)
+            guard result.bool("ok") == true, let id = result.json?["spaceID"] as? Int, id >= 0 else {
+                throw EgoBridge.BridgeError.noResult(result.rawOutput)
+            }
+            spaceID = id
+        }
     }
     public func handOff() async throws {
         guard let id = spaceID else { throw EgoBridge.BridgeError.toolFailed("还没有可打开的浏览器工作区") }
@@ -82,7 +89,7 @@ public final class DispatchService: DispatchServicing {
             const task = await \(handedOff ? "takeOverTaskSpace" : "taskSpace")(\(id));
             const tabs = await task.tabs();
             const urls = Object.fromEntries(tabs.filter(tab => tab.label).map(tab => [tab.label, tab.url]));
-            await task.finish({keep: tabs.filter(tab => tab.label).map(tab => tab.label)});
+            await task.finish({keep:"all"});
             cliLog(JSON.stringify({ok:true, urls}));
         }
         """)
@@ -92,33 +99,13 @@ public final class DispatchService: DispatchServicing {
         handedOff = true
     }
 
-    /// Only a user action may reopen an exact completed or paused Space.
+    /// Final actions only activate ego; they never select, claim or switch a Space.
     public func openWorkspace(id: Int) async throws {
-        guard id > 0 else { throw EgoBridge.BridgeError.toolFailed("无效的浏览器工作区") }
-        guard id != spaceID || activeAttempts.isEmpty else {
-            throw EgoBridge.BridgeError.toolFailed("此工作区仍在填写中，请完成后再打开")
+        guard id >= 0 else { throw EgoBridge.BridgeError.toolFailed("无效的浏览器工作区") }
+        guard activeAttempts.isEmpty else {
+            throw EgoBridge.BridgeError.toolFailed("仍在填写中，请完成后再打开")
         }
-        if id == spaceID, !completed {
-            try await completeTask()
-        }
-        _ = try await EgoLiteEngine().runRaw(script: """
-        const info = (await listTaskSpaces()).find(space => space.id === \(id));
-        if (!info) throw new Error("对应的工作区已不存在");
-        const wasCompleted = info.ownership === "user";
-        const task = await (wasCompleted ? claimTaskSpace : takeOverTaskSpace)(\(id));
-        try {
-            const tabs = await task.tabs();
-            const active = tabs.find(tab => tab.active) || tabs[0];
-            if (!active) throw new Error("对应的工作区没有可查看页面");
-            const page = active.label ? task.page(active.label) : await task.adopt(active.page);
-            await page.cdp("Page.bringToFront");
-        } finally {
-            if (wasCompleted) await task.finish({keep: (await task.pages()).map(page => page.label)});
-            else await task.handOff();
-        }
-        cliLog(JSON.stringify({ok:true}));
-        """)
-        if id == spaceID { handedOff = true }
+        try await EgoWorkspaceNavigator.activate()
     }
 
     /// Finished tasks lose Page labels. Resolve a unique original URL, never an arbitrary tab.
@@ -150,7 +137,7 @@ public final class DispatchService: DispatchServicing {
             }
         } catch (error) { navigationError = String(error); }
         finally {
-            if (wasCompleted) await task.finish({keep: (await task.pages()).map(page => page.label)});
+            if (wasCompleted) await task.finish({keep:"all"});
             else await task.handOff();
         }
         cliLog(JSON.stringify({ok: !missing && !navigationError, missing, navigationError}));
@@ -159,6 +146,7 @@ public final class DispatchService: DispatchServicing {
         if result.bool("missing") == true { throw ChannelNavigationError.pageUnavailable }
         if let error = result.string("navigationError") { throw EgoBridge.BridgeError.toolFailed(error) }
         guard result.bool("ok") == true else { throw EgoBridge.BridgeError.noResult(result.rawOutput) }
+        try await EgoWorkspaceNavigator.activate()
     }
 
     public func resumeControl() async throws {
@@ -185,11 +173,10 @@ public final class DispatchService: DispatchServicing {
             bridges[platform] = bridge
         } else {
             let engine = try EgoLiteEngine()
-            let name = String(data: try JSONSerialization.data(withJSONObject: [spaceName]), encoding: .utf8)!
-            let result = try await engine.runRaw(script: "const task = await taskSpace(\(name)[0]); const page = \(bridges.isEmpty ? "task.page(\"p1\")" : "await task.newPage()"); cliLog(JSON.stringify({label:page.label,spaceID:task.spaceId}));")
+            guard let id = spaceID else { throw EgoBridge.BridgeError.toolFailed("尚未连接 ego 当前空间") }
+            let result = try await engine.runRaw(script: "const task = await taskSpace(\(id)); const page = await task.newPage(); cliLog(JSON.stringify({label:page.label}));")
             guard let label = result.string("label") else { throw EgoBridge.BridgeError.noResult(result.rawOutput) }
-            spaceID = result.json?["spaceID"] as? Int
-            bridge = try EgoBridge(spaceName: spaceName, engine: engine, pageLabel: label)
+            bridge = try EgoBridge(spaceName: "", engine: engine, pageLabel: label, spaceID: id)
             bridges[platform] = bridge
         }
         return bridge

@@ -26,7 +26,7 @@ public final class CompletionNotifier {
         let content = UNMutableNotificationContent()
         content.title = title; content.body = message; content.sound = .default
         if let taskID { content.userInfo[Self.taskIDKey] = taskID.uuidString }
-        if let workspaceID, workspaceID > 0 { content.userInfo[Self.workspaceIDKey] = workspaceID }
+        if let workspaceID, workspaceID >= 0 { content.userInfo[Self.workspaceIDKey] = workspaceID }
         return content
     }
 

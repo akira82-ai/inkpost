@@ -65,12 +65,12 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, UNUserNotificationCen
             pendingNotificationRoutes.append((taskID, workspaceID))
             return
         }
-        guard let taskID, let workspaceID, workspaceID > 0 else {
-            controller.state.notice = "这条通知没有可打开的浏览器工作区，请查看任务状态"
+        guard let taskID else {
+            controller.state.notice = "这条通知没有任务信息，请查看任务状态"
             showMainWindow()
             return
         }
-        await controller.openNotificationWorkspace(taskID: taskID, workspaceID: workspaceID)
+        await controller.openNotificationWorkspace(taskID: taskID, workspaceID: workspaceID ?? 0)
     }
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         completionHandler([.banner, .sound])

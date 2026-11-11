@@ -3,17 +3,19 @@ import Foundation
 /// EgoBridge —— 确定性渠道适配器的浏览器工具层。
 ///
 /// 每个工具调用 = 一次 ego-browser 官方调用（spawn → 执行 helper → 退出读 JSON）。
-/// 无协议、无长驻进程、无流式问题；TaskSpace 按名字跨调用恢复浏览器状态。
+/// 无协议、无长驻进程、无流式问题；TaskSpace 按稳定 ID 跨调用恢复浏览器状态；测试兼容名字定位。
 /// 可通过注入传输独立测试。
 public struct EgoBridge {
     let engine: EgoLiteEngine
     public let spaceName: String
     public let pageLabel: String
+    public let spaceID: Int?
 
-    public init(spaceName: String, engine: EgoLiteEngine, pageLabel: String = "p1") throws {
+    public init(spaceName: String, engine: EgoLiteEngine, pageLabel: String = "p1", spaceID: Int? = nil) throws {
         self.spaceName = spaceName
         self.engine = engine
         self.pageLabel = pageLabel
+        self.spaceID = spaceID
     }
 
     // MARK: - 工具集（映射到官方 helper）
@@ -90,7 +92,7 @@ public struct EgoBridge {
     /// 把一段官方 helper 调用包进"Space 恢复 + 单脚本执行 + 结果提取"
     func run(_ body: String) async throws -> String {
         let script = """
-        const task = await taskSpace(\(jsStr(spaceName)));
+        const task = await taskSpace(\(spaceID.map(String.init) ?? jsStr(spaceName)));
         const page = task.page(\(jsStr(pageLabel)));
         try {
           \(body)

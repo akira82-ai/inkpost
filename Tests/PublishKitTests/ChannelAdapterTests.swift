@@ -441,15 +441,18 @@ struct DeterministicFixtureTests {
         try Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")!.write(to: image)
         let service = DispatchService(registryFactory: { .init([FixtureChannelAdapter()]) })
         let task = UUID(); try await service.beginTask(id: task)
+        let id = try #require(service.workspaceID)
+        let engine = try EgoLiteEngine()
+        let original = try await engine.runRaw(script: "const task = await taskSpace(\(id)); cliLog(JSON.stringify({targets:(await task.tabs()).map(t=>t.targetId)}));")
+        let originalTargets = try #require(original.json?["targets"] as? [String])
+        let originalJSON = String(data: try JSONSerialization.data(withJSONObject: originalTargets), encoding: .utf8)!
         let result = try await service.execute(request: .init(title: "Fixture smoke", body: "  **正文**\n\n\n  ```swift\n  let x = 1\n  ```\n  #AI\t##工具\n尾部 👨‍👩‍👧‍👦🖋️  ", html: " <p>explicit unused HTML</p> ", assets: [image.path]),
             execution: .init(taskID: task, platform: .simFixture), command: .prepare, onEvent: { _ in })
         #expect(result == .readyForReview(message: "模拟平台已填好"))
-        let id = try #require(service.workspaceID)
-        let engine = try EgoLiteEngine()
-        let check = try await engine.runRaw(script: "const task = await taskSpace(\(id)); const page = task.page('p1'); cliLog(JSON.stringify({unpublished: await page.evaluate(() => !document.querySelector('#receipt').dataset.url)}));")
+        let check = try await engine.runRaw(script: "const task = await taskSpace(\(id)); const tabs=await task.tabs(); const tab=tabs.find(t=>!\(originalJSON).includes(t.targetId)); if (!tab?.label) throw new Error('Fixture unavailable'); const page = task.page(tab.label); cliLog(JSON.stringify({unpublished: await page.evaluate(() => !document.querySelector('#receipt').dataset.url)}));")
         #expect(check.bool("unpublished") == true)
         if result.failure == nil {
-            _ = try await engine.runRaw(script: "const task = await taskSpace(\(id)); await task.finish({keep:[]}); cliLog(JSON.stringify({ok:true}));")
+            _ = try await engine.runRaw(script: "const task = await taskSpace(\(id)); for(const tab of await task.tabs()) { if(tab.label && !\(originalJSON).includes(tab.targetId)) await task.page(tab.label).close(); } await task.finish({keep:'all'}); cliLog(JSON.stringify({ok:true}));")
         }
     }
 }

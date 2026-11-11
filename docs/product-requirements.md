@@ -60,11 +60,11 @@
 - Hide automatically once only after valid Start Filling begins execution. Progress, completion, failure, cancellation, login waiting, focus loss and Escape must not change visibility.
 - Main window and Settings share one DispatchController/DispatchModel. Task operations share the same model; the main window shows concise results and one navigation action, without execution logs or raw errors. NativeMenuBar owns status copy and fixed-size image animation; animation ticks never write title or item length. Window lifecycle remains in Views.
 
-- Product workflow ends at awaitingConfirm (已填好); no product UI for published or receipt tracking. On successful workspace handoff, archive the content, images and Space identity in session history, then reset the editor while retaining channel selection. Failed navigation and login-waiting tasks must retain content. Ended tasks with problems also archive/reset only after successful final Space navigation. Internal fixture CLI may retain receipt checks.
+- Product workflow ends at awaitingConfirm (已填好); no product UI for published or receipt tracking. On successful workspace handoff, archive the content, images and Space identity in session history, then reset the editor while retaining channel selection. Failed navigation and login-waiting tasks must retain content. Ended tasks with problems also archive/reset only after successful ego application activation. Internal fixture CLI may retain receipt checks.
 - PNG encoding belongs exclusively to AssetService during task preparation, before any adapter/browser execution. DispatchService retains one complete prepared batch per task and passes its source-to-PNG mapping through ChannelExecutionContext while preserving the original ChannelRequest. Adapters upload only those PNG files; adapter-side or clipboard-side format conversion, repair, and fallback to originals are forbidden. Resume reuses the same batch; release it only after no invocation can use it. Reject unsupported animated/multiframe assets explicitly, never silently flatten them.
 - Assets use AssetService for validation and byte-based SHA-256 deduplication. The editor's current six-image selection limit is a product-level constraint, independent of each channel's supported image count. Pass every selected image to each selected adapter; the adapter reports any channel-specific excess rather than silently selecting a subset. Temporary assets are not durable drafts.
 - Image sorting drops insert the source immediately before the target, with an insertion marker at the target's leading edge. Dropping onto itself, cancelling or rejecting a drag preserves content and order; ending the drag clears its visual state. Sorting is disabled outside the pending editor phase. Display, model and complete channel requests use the same ordered assets; external image import is separate from internal sorting.
-- DispatchService owns one Space per task and explicitly labeled Pages per channel. Handoff and user-confirmed resume preserve context.
+- DispatchService reuses the current ego Space and creates a new labeled Page per channel. It never creates, names, groups or switches Spaces. Space IDs are internal SDK context only; handoff and user-confirmed resume preserve the channel Pages.
 - Inspect is read-only; evaluate remains internal for trusted channel implementations and fixture/tools. Do not claim browser writes are an enforceable no-publish sandbox.
 
 ## 渠道验收
@@ -114,13 +114,20 @@
 - 采用 `prototypes/inkpost-completion-handoff.html` 已确认方案。渠道标签内用无背景线性图标显示填写中、填写成功、需登录、其他问题；图标具有文字提示与无障碍说明。编辑时标签选择渠道，任务中冻结选择，登录/问题图标独立点击打开该任务对应的原渠道 Page。
 - 有待登录渠道时主按钮「我已登录，继续」。点击后只恢复登录等待渠道，复用原输入快照、任务、Space 和 Page；已填好渠道不重复执行。普通异常不自动重试，也不把超时推断为未登录。可跳过剩余待登录渠道转为手工处理。
 - 等待登录是过程状态，不发最终完成通知、不完成 Space。其他渠道继续本轮填写；若执行中点击登录/问题图标，导航请求先排队，待本轮其他渠道停止自动操作后才打开目标 Page 并交还整个 Space，避免用户与 Agent 同时操作。
-- 全部填好：主按钮「已填写，需要你手工发布」；存在其他问题、跳过或取消：主按钮「去查看」。自动流程结束后完成 ego Space 并保留页面交还控制权；仅表示填写结束，不表示内容已发布。控制权交还失败必须明确提示，不能伪报成功。
-- 最终主按钮打开本次任务 Space，成功后归档并清空标题、正文、图片，保留渠道选择；打开失败保留内容与重试入口。渠道图标只导航，不重置、不改变渠道结果。通知导航不清空其他任务。
-- 自动填写已结束且最终打开工作区失败时，在报错后同排显示轻量文字按钮「我已处理，忽略」。点击无需二次确认，不再访问 ego，直接清空标题、正文、图片及本次任务状态，保留渠道选择并恢复正文焦点；执行中、等待登录或导航进行中不可用。
-- 完成后的 Space 不可继续填写；原 Page 标签失效时，只能通过保存的唯一页面身份重新定位，无法唯一确认时明确报错，不跳其他渠道或首页。无消散动画。
+- 全部填好：主按钮「已填写，需要你手工发布」；存在其他问题、跳过或取消：主按钮「去查看」。自动流程结束后通过 SDK 结束自动操作并保留全部页面、交还控制权；仅表示填写结束，不表示内容已发布。控制权交还失败必须明确提示，不能伪报成功。
+- 最终主按钮只激活 ego 应用，不查找或切换指定 Space，成功后归档并清空标题、正文、图片，保留渠道选择；激活失败保留内容与重试入口。用户中途切换 Space 后自行切回。渠道图标仅定位渠道页面，不重置、不改变渠道结果；通知只激活 ego，不清空其他任务。
+- 自动填写已结束且最终激活 ego 失败时，在报错后同排显示轻量文字按钮「我已处理，忽略」。点击无需二次确认，不再访问 ego，直接清空标题、正文、图片及本次任务状态，保留渠道选择并恢复正文焦点；执行中、等待登录或导航进行中不可用。
+- 本次填写任务完成后不可继续填写；原 Page 标签失效时，只能通过保存的唯一页面身份重新定位，无法唯一确认时明确报错，不跳其他渠道或首页。无消散动画。
 
 ## B站普通图文动态（#29）
 
 - 入口为 `https://t.bilibili.com/`；标题选填、正文必填、图片选填。标题与正文分别先点击对应输入元素获得焦点，再粘贴并回读核对，停在发布按钮前，用户手工发布。
 - 首次填写前清空 B站编辑区原有标题、正文和图片，确认清空后再填写。恢复时不重复清空或粘贴，复用原 Page 和有序图片检查点；公共分发不增加 B站专属分支。
 - 平台正文须与适配器收到的任务输入一致（公共层已统一去除整段首尾空白）；若平台另行改动内容，明确要求用户检查，不静默改写或报告填写成功。具体页面规则和验收边界见 [B站适配器维护](../Sources/PublishKit/Services/Channels/BilibiliChannelAdapter.md)。
+
+## 当前空间打开渠道（#52，取代每任务新建 Space）
+
+- 开始时锁定 ego 当前 Space，在其中为各渠道新开 Tab，不创建、命名、分组或切换 Space，不覆盖或关闭用户原有页面。执行中不跟随用户切换空间。
+- Space 编号仅用于 SDK 填写、登录恢复和控制权交还，允许默认 Space 的编号 0；所有页面在结束时保留，使用 SDK 结束自动操作并交还用户，不额外管理空间名称与状态。
+- 获取当前窗口使用 ego 原生脚本接口，可能需要系统自动化权限；只能唯一确认当前 Space 且窗口 ID 一致时才创建渠道 Tab，确认失败明确报错，不猜选其他空间。
+- 最终按钮和通知只激活 ego，不要求指定 Space 可用。最终按钮激活成功才重置稿件；通知不清空稿件。不实现分组或消散动效。

@@ -205,3 +205,14 @@ swift test --no-parallel \
 - 测试页仅使用纯色 PNG，测试标题、正文和图片已清理，测试 Space 已 finish；全程没有点击发布。未实测退出登录、登录过期、断网、六图极限、账号限制或正式应用整条分发交接链路；离线故障覆盖不能替代这些现场验收。
 - 全量串行回归 124 tests / 23 suites 通过（175.138 秒），日志 `/tmp/inkpost29-regression.log`；测试构建与 `git diff --check` 通过。
 - 0.18.0 交付复核：124 项串行测试、23 个套件通过（184.715 秒）；本地 compact-smoke、差异与打包脚本语法检查通过。仅打包模式生成正式签名应用、DMG、ZIP 和签名 appcast；版本、解压签名和 SHA256 校验通过。未替换当前运行的应用。
+
+## #52 当前空间与最终交接（2026-11-11）
+
+- 0.20.0 提交复核：最终代码全量串行 137 tests / 25 suites 通过（185.087 秒）；差异和打包脚本语法检查通过。正式签名 release 构建、DMG 完整性、ZIP 解压验签、版本、自动化用途说明、SHA256 及签名更新清单校验通过。本轮仅打包，未替换运行应用，未重新执行真实浏览器交互；现场验收剩余项保持开放。
+- 取代上文历史的每任务新建 Space 和最终精确切换 Space：DispatchService 开始时读取 ego 原生 front window ID / active tab title，使用 listTaskSpaces 的唯一候选及 Browser.getWindowForTarget 精确窗口 ID 校验后 claim 当前空间。重复标题无法唯一确认时显式失败，不试探接管其他空间。
+- 每渠道通过 newPage 新建 Tab，EgoBridge 按数字 Space ID 恢复上下文，避免重名空间定位错误；结束使用 finish({keep:"all"}) 保留全部已有和新增页面并交还控制权。Space 0 是合法默认空间，通知与生命周期校验均支持。保留 SDK 任务收尾必需的内部上下文，不主动命名、分组或切换 Space。
+- 最终按钮与通知不再调用浏览器导航脚本，只通过 NSWorkspace.openApplication 激活 ego 并检查前台进程；最终成功才归档和重置，失败保留内容及重试。渠道单页入口仍复用已有页面定位能力。
+- Info.plist 声明 NSAppleEventsUsageDescription；读取当前窗口可能需要“隐私与安全性 → 自动化”授权，激活 ego 本身不依赖 Apple Events。SDK 无直接 current Space API，此处不猜 ego URL scheme 或私有接口。
+- 验证：完整串行回归 137 tests / 25 suites 通过（187.044 秒，`/tmp/inkpost52-full.log`）；最终收尾允许缺失 Space 记录后专项复测 43 tests / 2 suites 通过（0.164 秒，`/tmp/inkpost52-final-tests.log`）。默认 Space 0 的真实导航测试通过（5.646 秒，`/tmp/inkpost52-current-live3.log`）：Space 数量不变、两个渠道各新增一个本地 fixture Tab、原有 target ID 全部保留、完成后 user ownership、激活 ego 成功；随后只清理唯一标记测试 Tab，没有发布内容。
+- 正式 Inkpost 签名 debug 包 `.build/Inkpost-issue52-current-space.app` 已构建，strict/deep 验签通过（`/tmp/inkpost52-build.log`），未停止或替换现有墨驿进程。正式应用首次自动化授权、完整真实渠道分发和多 Space 重名候选现场仍未验收；当前无法唯一确认时显式失败。
+- 排查记录：NSAppleScript 在 Swift 并发工作线程执行时，真实测试阻塞在 AppleScript 事件循环；改为主线程执行后只读窗口查询正常。原生脚本只读取窗口身份，不切换窗口；最终唤起使用 NSWorkspace，不依赖该脚本。

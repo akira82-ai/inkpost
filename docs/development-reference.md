@@ -4,6 +4,14 @@
 
 ## 代码组织
 
+### 分发输入首尾空白（#51，2026-11-11）
+
+- `DispatchController.dispatch()` 创建共享任务快照时，对整段标题和正文各调用一次 `trimmingCharacters(in: .whitespacesAndNewlines)`；不逐行处理，不修改编辑状态。各渠道及登录恢复复用该快照，HTML 和有序素材不变。
+- 正文纯空白沿用 `PlatformRules.canStart` 的必填校验，在创建任务前阻止；标题纯空白成为空标题，仍按各渠道的标题规则校验。适配器继续按收到的请求完整核对内容，不额外放宽校验。
+- 验证：修改前后公共分发测试均为 38 tests / 1 suite 通过；`swift build` 和全量串行测试 124 tests / 23 suites 通过（186.236 秒）。覆盖首尾空格、制表符、CRLF、内部空行/缩进/标签/emoji、原稿保留、空白标题/正文及恢复快照。真实平台 live 测试未启用，未重新启动运行中的应用。
+
+- 0.18.1 提交复核：124 tests / 23 suites 串行通过（185.179 秒）；差异与打包脚本语法检查通过。正式签名 release 构建、DMG 完整性、ZIP 解压验签、版本与 SHA256 校验及签名更新清单校验通过。本次仅打包，未替换运行中的应用，未重新进行真实平台交互验收。
+
 ### 在线更新（#49，2026-11-10）
 
 - 精确依赖 Sparkle 2.10.1，SPM 锁定 revision 和官方二进制校验。`UpdateModel` 存展示状态，`UpdateController` 适配官方 `SPUUserDriver`/`SPUUpdaterDelegate`，SwiftUI 视图呈现更新面板与设置；框架负责调度、下载、版本判断、验证和独立安装重启。不另建下载器、安装进程或轮询检查计时器。

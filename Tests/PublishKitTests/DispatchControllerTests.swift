@@ -222,19 +222,27 @@ struct DispatchControllerTests {
         #expect(ZhihuChannelAdapter().capabilities.usesTitle == true)
     }
 
-    @Test func testDispatchPreservesBodyWhitespaceAndMarkdown() async throws {
+    @Test func testDispatchTrimsEdgesAndPreservesInternalWhitespaceAndMarkdown() async throws {
         let service = FakeDispatchService()
         let controller = makeController(service)
-        let original = "  **正文**\n\n  尾部  \n  #AI\t##工具\n #中文  "
+        controller.state.selectedPlatforms = [.zhihu, .jike, .x, .weibo, .juejin, .bilibili, .xiaohongshu, .simFixture]
+        let expectedTitle = "标题  🖋️\t副标题"
+        let expectedBody = "**正文**\n\n  尾部  \n  #AI\t##工具\n #中文"
+        let originalTitle = " \t\r\n" + expectedTitle + "\r\n\t "
+        let original = " \t\r\n" + expectedBody + "\r\n\t "
+        controller.state.title = originalTitle
         controller.state.markdown = original
         controller.dispatch()
         try await waitForDispatch(controller)
-        #expect(service.requests.allSatisfy { $0.body == original })
-        #expect(service.requests.count == 3)
+        #expect(service.platforms == controller.state.selectedPlatforms)
+        #expect(service.requests.allSatisfy { $0.title == expectedTitle && $0.body == expectedBody })
+        #expect(service.requests.count == controller.state.selectedPlatforms.count)
+        #expect(controller.state.title == originalTitle)
+        #expect(controller.state.markdown == original)
     }
 
 
-    @Test func testRawInputSnapshotSurvivesDispatchAndResume() async throws {
+    @Test func testTrimmedInputSnapshotSurvivesDispatchAndResume() async throws {
         let service = FakeDispatchService()
         service.statuses[.x] = "needLogin"
         let controller = makeController(service)
@@ -246,6 +254,8 @@ struct DispatchControllerTests {
         controller.state.assetPaths = paths
         controller.dispatch()
         try await waitForDispatch(controller)
+        #expect(controller.state.title == title)
+        #expect(controller.state.markdown == body)
         controller.state.title = "changed"
         controller.state.markdown = "changed"
         controller.state.assetPaths = []
@@ -254,22 +264,24 @@ struct DispatchControllerTests {
         try await waitForDispatch(controller)
         #expect(service.requests.count == 4)
         for request in service.requests {
-            #expect(request.title == title)
-            #expect(request.body == body)
+            #expect(request.title == "标题 🖋️")
+            #expect(request.body == "**正文**\n\n\n  ```swift\n  let x = 1\n  ```\n尾部  \n  #AI\t##工具\n #中文")
             #expect(request.html.isEmpty)
             #expect(request.assets == paths)
         }
     }
 
-    @Test func testEmptyOptionalFieldsRemainEmpty() async throws {
+    @Test(arguments: ["", " \t\r\n "])
+    func testEmptyOptionalFieldsRemainEmpty(title: String) async throws {
         let service = FakeDispatchService()
         let controller = makeController(service)
-        controller.state.title = ""
+        controller.state.title = title
         controller.state.assetPaths = []
         controller.dispatch()
         try await waitForDispatch(controller)
         #expect(service.requests.count == 3)
         #expect(service.requests.allSatisfy { $0.title.isEmpty && $0.html.isEmpty && $0.assets.isEmpty })
+        #expect(controller.state.title == title)
     }
 
     @Test func testWhitespaceOnlyBodyIsRejectedWithoutMutation() {
@@ -279,6 +291,8 @@ struct DispatchControllerTests {
         controller.dispatch()
         #expect(service.requests.isEmpty)
         #expect(controller.state.markdown == " \n\t ")
+        #expect(controller.state.overallPhase == .pending)
+        #expect(controller.state.taskID == nil)
     }
 
     @Test func testVerificationFailureIsNotReportedAsFilled() async throws {

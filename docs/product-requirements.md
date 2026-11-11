@@ -22,7 +22,7 @@
 
 ### 发布与素材
 
-- Product content is plain text, supporting line breaks and emoji. Preserve whitespace and characters exactly. Do not render Markdown, generate HTML, use rich-text formatting, or add content processing features. Local fixtures use plain-text controls as well.
+- Product content is plain text, supporting line breaks and emoji. When creating the shared task snapshot, trim whitespace and newlines from the outer edges of the entire title and body before passing them to channel adapters (#51). Do not trim individual lines or change internal spaces, tabs, line breaks, blank lines or characters. Preserve the editor's original draft. All channels and login recovery use the same trimmed snapshot; whitespace-only body blocks task creation, and whitespace-only title becomes empty. This supersedes the previous no-trim requirement. Do not render Markdown, generate HTML, use rich-text formatting, or add other content processing features. Local fixtures use plain-text controls as well.
 
 - Inkpost is a menu-bar macOS application with no Dock icon. Clicking the menu-bar icon shows and activates the same publishing window on the user's current desktop without switching desktops. The publishing window uses normal window ordering: bring it forward on explicit invocation, then let other apps cover it normally. Do not use permanent floating levels or repeated activation to keep it in front.
 - `Sources/PublishKit/Services/`: configuration and external execution. Reuse EgoBridge, EgoLiteEngine and PostStore. All channel workflows are deterministic; do not add model clients, API keys, model configuration or model-driven tool execution.
@@ -71,7 +71,7 @@
 ## X channel
 
 - X uses a deterministic compose adapter without LLM configuration. Read [X adapter maintenance](../Sources/PublishKit/Services/Channels/XChannelAdapter.md) before changing it. Optional title is prepended to the first line; composed plain text is limited to 1899 user-visible characters by product decision, with at most four pasted images. Verify actual editor acceptance and stop before Post.
-- Dispatch preserves raw title, body, explicit HTML and ordered source assets in ChannelRequest. Dispatch does not generate HTML. Task-prepared PNG mappings stay separate from the original request.
+- Dispatch passes the title and body from the shared task snapshot after the common edge trim, preserving explicit HTML and ordered source assets in ChannelRequest. Dispatch does not generate HTML. Task-prepared PNG mappings stay separate from the request.
 
 ## Deterministic channel execution
 
@@ -84,7 +84,7 @@
 
 ## Juejin pins channel
 
-- Read [Juejin adapter maintenance](../Sources/PublishKit/Services/Channels/JuejinChannelAdapter.md) before changing it. Ordinary pins only; title is optionally prepended with one newline, composed text at most 1000 UTF-16 units. First filling clears old body/attachments as authorized; resume must never clear again. Preserve raw editor input; the website itself trims edge whitespace on submission. Attachments are staged locally and uploaded only by the user’s final Publish action; verify all staged images without claiming remote upload.
+- Read [Juejin adapter maintenance](../Sources/PublishKit/Services/Channels/JuejinChannelAdapter.md) before changing it. Ordinary pins only; title is optionally prepended with one newline, composed text at most 1000 UTF-16 units. First filling clears old body/attachments as authorized; resume must never clear again. Preserve the received task input after the common edge trim; the website itself trims edge whitespace on submission. Attachments are staged locally and uploaded only by the user’s final Publish action; verify all staged images without claiming remote upload.
 
 ## 异常结果展示与导航（#47，历史方案）
 
@@ -110,4 +110,4 @@
 
 - 入口为 `https://t.bilibili.com/`；标题选填、正文必填、图片选填。标题与正文分别先点击对应输入元素获得焦点，再粘贴并回读核对，停在发布按钮前，用户手工发布。
 - 首次填写前清空 B站编辑区原有标题、正文和图片，确认清空后再填写。恢复时不重复清空或粘贴，复用原 Page 和有序图片检查点；公共分发不增加 B站专属分支。
-- 平台若处理首尾空白导致正文与原稿不同，明确要求用户检查，不静默改写或报告填写成功。具体页面规则和验收边界见 [B站适配器维护](../Sources/PublishKit/Services/Channels/BilibiliChannelAdapter.md)。
+- 平台正文须与适配器收到的任务输入一致（公共层已统一去除整段首尾空白）；若平台另行改动内容，明确要求用户检查，不静默改写或报告填写成功。具体页面规则和验收边界见 [B站适配器维护](../Sources/PublishKit/Services/Channels/BilibiliChannelAdapter.md)。

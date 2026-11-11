@@ -269,7 +269,8 @@ public final class DispatchController {
         generation = UUID()
         let token = generation
         state.taskID = token
-        draftRequest = ChannelRequest(title: state.title, body: state.markdown,
+        draftRequest = ChannelRequest(title: state.title.trimmingCharacters(in: .whitespacesAndNewlines),
+                                      body: state.markdown.trimmingCharacters(in: .whitespacesAndNewlines),
                                       assets: state.assetPaths)
         runningTask = Task {
             await notifier.prepare()

@@ -8,7 +8,7 @@
 
 ## Observed workflow (2026-11-10, ego Lite)
 
-- Logged-in composer: `.bili-dyn-publishing`, title `.bili-dyn-publishing__title__input`, body `.bili-rich-textarea__inner[contenteditable="true"]`. Click each field before native keyboard.paste; do not assign DOM/framework state.
+- Logged-in composer: `.bili-dyn-publishing`, title `.bili-dyn-publishing__title__input`, body `.bili-rich-textarea__inner[contenteditable="true"]`. Click each field before native keyboard.press('Meta+V'); do not assign DOM/framework state.
 - Empty editor contains exactly U+200B and LF with the `empty` class. Plain paste produces U+200B + text + SPACE + LF. Read only text nodes and remove exactly these observed editor sentinels, never trim user content. Unknown structures fail verification rather than silently flattening mentions or other rich tokens.
 - Plain multiline text, empty paragraphs and emoji were verified. Bilibili itself trims edge whitespace during paste. This adapter reports a mismatch and preserves the page if raw input cannot be verified; it does not claim arbitrary whitespace survives. Final publication was never invoked or verified.
 - Clear existing title, body and images once before the first fill. Read back all three to confirm they are empty. A failed or uncertain clear stops filling; resume never clears again. Uncertain pastes are not replayed.
@@ -22,3 +22,7 @@
 - Real adapter through injected CLI tests covers raw request comparison, title UTF-16 limit, empty body, login resume, preexisting draft replacement and failed clearing, uncertain title/body/image writes, timeout, blocked/rejected state, external title/body edits, ordered image deletion/replacement/reordering, cancellation and PNG paths.
 - Opt-in live test: `INKPOST_BILIBILI_LIVE=1`, `INKPOST_BILIBILI_SPACE` set to the agent-owned test Space name. Requires `/tmp/inkpost-bili-test-1.png` and `-2.png`. It clears only the disposable test Page, runs no-title/no-image and title/two-image cases, then resumes the same adapters without duplicate writes; an edge-whitespace case must fail exact verification. Test cleanup must hover each image tile before clicking its remove control and wait for the count to decrease. Avoid reloading between cases: the website asynchronously restores old draft attachments during startup. It never publishes. Do not run against a user's draft Page.
 - Live and automated results are recorded in docs/development-reference.md. Network interruption, expired login, account restrictions and maximum image acceptance remain unverified in live browser testing.
+
+## Temporary clipboard writes (#55)
+
+Text paste uses `ClipboardPasteService.withTextPaste(text)` to write plain text and `org.nspasteboard.TransientType` in one pasteboard item, followed by native `Meta+V`. Do not call `keyboard.paste(text)` here: that would rewrite the marked clipboard. PNG clipboard uploads share the same marker and lease. Restore only while the app owns the pasteboard change count; never overwrite a newer user copy. This remains native paste, not direct DOM editing. Channel-specific live compatibility after this change still requires verification.

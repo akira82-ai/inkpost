@@ -11,7 +11,7 @@
 ## Verified interactions
 
 - 2026-11-07: the visible 分享你的想法... placeholder is an overlay. Clicking that text times out because the editable paragraph intercepts input. Target its owning `form [data-lexical-editor="true"][contenteditable="true"]` instead; fail on missing/ambiguous structure.
-- Click the editor and use native keyboard.paste for complete plain text. Lexical uses paragraphs containing text spans and BR nodes; read logical paragraph children with BR as a line break, empty placeholder paragraph as empty, preserving spaces and empty lines. Do not use textContent alone or trim user content.
+- Click the editor and use native keyboard.press('Meta+V') for complete plain text. Lexical uses paragraphs containing text spans and BR nodes; read logical paragraph children with BR as a line break, empty placeholder paragraph as empty, preserving spaces and empty lines. Do not use textContent alone or trim user content.
 - Native image chooser verified via `form [title="图片"]`, waitForFileChooser then setFiles with an explicit path. Use this tested route, not clipboard image paste, which was blocked during development due to clipboard races. Upload one at a time and verify before continuing.
 - Count only sortable attachment cards inside the composer form. Blob preview URLs can change during upload: confirm identity only after loading markers disappear, image decodes, and Send becomes enabled. Adding another image recreates existing blob URLs: hash decoded preview pixels with SHA-256 instead of comparing or fetching blob URLs (revoked URLs race with upload). Read pixels with a detached OffscreenCanvas; include dimensions in the digest. After confirmation compare ordered tile ID + preview pixel digest to detect replacement/reordering.
 - Mark upload pending before dispatch. Unknown results or changed attachments require inspection; never blindly upload again. Resume reuses the same adapter/Page and checks existing text/images before writes. Do not reload an existing editor or close it. No durable draft claim.
@@ -28,3 +28,7 @@
 - PNG preparation contract (#30): AssetService prepares the complete ordered PNG batch before browser execution. Receive the unchanged original ChannelRequest and obtain final PNG upload paths through `context.uploadPaths(for:)`. Never convert formats, repair input, or fall back to original files in this adapter. DispatchService retains the same batch during login waits and resume. Clipboard writes copy validated PNG bytes unchanged.
 
 - Raw input contract (#9): body is plain text, including whitespace, line breaks and emoji. Preserve every character without rendering or content processing. Explicit HTML remains an unused compatibility field. Task-prepared PNG mappings stay separate from the original request.
+
+## Temporary clipboard writes (#55)
+
+Text paste uses `ClipboardPasteService.withTextPaste(text)` to write plain text and `org.nspasteboard.TransientType` in one pasteboard item, followed by native `Meta+V`. Do not call `keyboard.paste(text)` here: that would rewrite the marked clipboard. PNG clipboard uploads share the same marker and lease. Restore only while the app owns the pasteboard change count; never overwrite a newer user copy. This remains native paste, not direct DOM editing. Channel-specific live compatibility after this change still requires verification.

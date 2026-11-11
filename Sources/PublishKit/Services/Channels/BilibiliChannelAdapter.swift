@@ -96,11 +96,11 @@ final class BilibiliChannelAdapter: ChannelAdapter {
         if initial.title.isEmpty && !request.title.isEmpty {
             guard !titleAttempted else { throw failure("B站标题上次填写结果未知，不会重复粘贴") }
             titleAttempted = true
-            _ = try await ClipboardPasteService.withTextPaste {
+            _ = try await ClipboardPasteService.withTextPaste(request.title) {
                 try await context.bridge.run("""
                     // bilibili:paste-title
                     await page.click('\(Self.title)', {label:'填写 B站动态标题'});
-                    await page.keyboard.paste(\(context.bridge.jsStr(request.title)));
+                    await page.keyboard.press('Meta+V');
                     cliLog(JSON.stringify({ok:true}));
                     """)
             }
@@ -108,11 +108,11 @@ final class BilibiliChannelAdapter: ChannelAdapter {
         if initial.body.isEmpty {
             guard !bodyAttempted else { throw failure("B站正文上次填写结果未知，不会重复粘贴") }
             bodyAttempted = true
-            _ = try await ClipboardPasteService.withTextPaste {
+            _ = try await ClipboardPasteService.withTextPaste(request.body) {
                 try await context.bridge.run("""
                     // bilibili:paste-body
                     await page.click('\(Self.editor)', {label:'填写 B站动态正文'});
-                    await page.keyboard.paste(\(context.bridge.jsStr(request.body)));
+                    await page.keyboard.press('Meta+V');
                     cliLog(JSON.stringify({ok:true}));
                     """)
             }

@@ -236,6 +236,7 @@ struct ClipboardContractTests {
         catch { #expect((error as? ChannelFailure)?.recovery == .retryAllowed) }
         try lease.writePNG(path: file.path)
         #expect(board.data(forType: .png) != nil)
+        #expect(board.types?.contains(ImageClipboardSession.transientType) == true)
         #expect(board.data(forType: .png) == (try Data(contentsOf: file)))
         lease.restore(); lease.restore()
         #expect(board.string(forType: .string) == "original")
@@ -247,14 +248,48 @@ struct ClipboardContractTests {
         #expect(board.string(forType: .string) == "new user copy")
     }
 
-    @Test func nativePasteLeaseReleasesAfterFailure() async throws {
-        do {
-            let _: Void = try await ClipboardPasteService.withTextPaste { throw CancellationError() }
-            Issue.record("Cancellation swallowed")
-        } catch { #expect(error is CancellationError) }
+    @Test func textPasteMarksAndRestoresAllRepresentationsOnSuccessAndFailure() async throws {
         let board = NSPasteboard(name: .init("inkpost-test-\(UUID().uuidString)"))
+        let first = NSPasteboardItem()
+        first.setString("original", forType: .string)
+        first.setData(Data("<b>original</b>".utf8), forType: .html)
+        let second = NSPasteboardItem()
+        second.setString("second item", forType: .string)
+        board.clearContents(); board.writeObjects([first, second])
+        for fail in [false, true] {
+            do {
+                try await ClipboardPasteService.withTextPaste("正文\n\n保留  空格 😀", clipboard: board) {
+                    #expect(board.string(forType: .string) == "正文\n\n保留  空格 😀")
+                    #expect(board.types?.contains(ImageClipboardSession.transientType) == true)
+                    #expect(throws: (any Error).self) { try ImageClipboardSession.acquire(clipboard: board) }
+                    if fail { throw CancellationError() }
+                }
+                #expect(!fail)
+            } catch { #expect(fail && error is CancellationError) }
+            #expect(board.pasteboardItems?.count == 2)
+            #expect(board.pasteboardItems?.first?.string(forType: .string) == "original")
+            #expect(board.data(forType: .html) == Data("<b>original</b>".utf8))
+            #expect(board.pasteboardItems?[1].string(forType: .string) == "second item")
+            #expect(board.types?.contains(ImageClipboardSession.transientType) == false)
+        }
+    }
+
+    @Test func textPastePreservesNewUserCopyOnCancellation() async throws {
+        let board = NSPasteboard(name: .init("inkpost-test-\(UUID().uuidString)"))
+        board.clearContents(); board.setString("original", forType: .string)
+        do {
+            try await ClipboardPasteService.withTextPaste("temporary", clipboard: board) {
+                board.clearContents(); board.setString("new user copy", forType: .string)
+                throw CancellationError()
+            }
+        } catch { #expect(error is CancellationError) }
+        #expect(board.string(forType: .string) == "new user copy")
         let lease = try ImageClipboardSession.acquire(clipboard: board)
-        lease.restore()
+        defer { lease.restore() }
+        try lease.writeText("next temporary")
+        board.clearContents(); board.setString("another copy", forType: .string)
+        #expect(throws: (any Error).self) { try lease.writeText("must not overwrite") }
+        #expect(board.string(forType: .string) == "another copy")
     }
 
     @Test func clipboardRejectsNonPNGWithoutConvertingOrChangingClipboard() throws {
@@ -306,7 +341,7 @@ struct ZhihuAdapterTests {
         }
         if mode == "bodyConflict" { #expect(!scriptLog.contains("await page.fill")) }
         #expect(!scriptLog.contains("Escape"))
-        #expect(!scriptLog.contains("Meta+V")) // zero-image flow
+        #expect(!scriptLog.contains("keyboard.paste(")) // text must not rewrite the marked clipboard
     }
 
     @Test func zhihuCharacterBoundariesAndOptionalFields() throws {

@@ -49,7 +49,7 @@
 - Adapters verify their complete channel-specific content transformation before returning `readyForReview`; the coordinator must not independently call a second verification API. A channel may ignore or transform a field according to its documented rules, but must not silently truncate content or discard excess images to report success.
 - Every invocation carries task/platform/attempt identity. Reject stale events and results, duplicate prepare and changed-snapshot resume. Recovery reuses the original request, adapter and Page; new tasks use fresh sessions.
 - Propagate `CancellationError` through adapters and the browser process executor; stop later tools/channels and retain content. A browser operation may have completed before cancellation; do not equate cancellation with rollback. Unknown write results require user inspection, never blind automatic retry.
-- Native text paste and PNG paste share an exclusive clipboard lease. Text paste delegates clipboard handling to ego Lite; app-owned PNG writes restore only while the app still owns the change count. Preserve newer user copies.
+- Native text paste and PNG paste share an exclusive clipboard lease. Inkpost writes the payload together with `org.nspasteboard.TransientType`, then ego Lite sends `Meta+V` without rewriting the clipboard. Restore saved items and representations only while Inkpost still owns the change count; preserve newer user copies. Supporting history apps (including echo) ignore the temporary payload; this marker does not prevent a user from seeing/pasting it during the temporary occupation, nor force unsupported history apps to ignore it.
 
 ## Main window implementation
 

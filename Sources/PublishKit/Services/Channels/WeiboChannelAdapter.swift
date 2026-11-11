@@ -99,11 +99,11 @@ final class WeiboChannelAdapter: ChannelAdapter {
         if initial.body.isEmpty {
             guard !bodyPasteAttempted else { throw failure("上次正文粘贴结果未知，请检查页面；不会重复粘贴") }
             bodyPasteAttempted = true
-            _ = try await ClipboardPasteService.withTextPaste {
+            _ = try await ClipboardPasteService.withTextPaste(expected) {
                 try await context.bridge.run("""
                     // weibo:paste-body
                     \(Self.ensureFocus)
-                    await page.keyboard.paste(\(context.bridge.jsStr(expected)));
+                    await page.keyboard.press('Meta+V');
                     cliLog(JSON.stringify({ok:true}));
                     """)
             }

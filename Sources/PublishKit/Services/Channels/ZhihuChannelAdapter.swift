@@ -74,11 +74,11 @@ final class ZhihuChannelAdapter: ChannelAdapter {
 
     private func fillBody(_ body: String, existing: String, bridge: EgoBridge) async throws {
         guard existing.isEmpty else { return }
-        _ = try await ClipboardPasteService.withTextPaste {
+        _ = try await ClipboardPasteService.withTextPaste(body) {
             try await bridge.run("""
                 // zhihu:paste-body
                 await page.click(\(bridge.jsStr(Self.bodyTarget)), {label:'粘贴完整正文'});
-                await page.keyboard.paste(\(bridge.jsStr(body)));
+                await page.keyboard.press('Meta+V');
                 cliLog(JSON.stringify({ok:true}));
                 """)
         }

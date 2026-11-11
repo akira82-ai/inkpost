@@ -1,12 +1,17 @@
-import Foundation
+import AppKit
 
-/// A single lease covers focus + native paste. Adapters supply the target interaction.
+/// Own the marked clipboard write; the operation must focus and send Meta+V only.
 @MainActor
 public enum ClipboardPasteService {
-    public static func withTextPaste<T>(_ operation: () async throws -> T) async throws -> T {
-        let lease = try ImageClipboardSession.acquire()
+    public static func withTextPaste<T>(_ text: String, _ operation: () async throws -> T) async throws -> T {
+        try await withTextPaste(text, clipboard: .general, operation)
+    }
+
+    static func withTextPaste<T>(_ text: String, clipboard: NSPasteboard,
+                                _ operation: () async throws -> T) async throws -> T {
+        let lease = try ImageClipboardSession.acquire(clipboard: clipboard)
         defer { lease.restore() }
-        try Task.checkCancellation()
+        try lease.writeText(text)
         return try await operation()
     }
 }

@@ -216,3 +216,19 @@ swift test --no-parallel \
 - 验证：完整串行回归 137 tests / 25 suites 通过（187.044 秒，`/tmp/inkpost52-full.log`）；最终收尾允许缺失 Space 记录后专项复测 43 tests / 2 suites 通过（0.164 秒，`/tmp/inkpost52-final-tests.log`）。默认 Space 0 的真实导航测试通过（5.646 秒，`/tmp/inkpost52-current-live3.log`）：Space 数量不变、两个渠道各新增一个本地 fixture Tab、原有 target ID 全部保留、完成后 user ownership、激活 ego 成功；随后只清理唯一标记测试 Tab，没有发布内容。
 - 正式 Inkpost 签名 debug 包 `.build/Inkpost-issue52-current-space.app` 已构建，strict/deep 验签通过（`/tmp/inkpost52-build.log`），未停止或替换现有墨驿进程。正式应用首次自动化授权、完整真实渠道分发和多 Space 重名候选现场仍未验收；当前无法唯一确认时显式失败。
 - 排查记录：NSAppleScript 在 Swift 并发工作线程执行时，真实测试阻塞在 AppleScript 事件循环；改为主线程执行后只读窗口查询正常。原生脚本只读取窗口身份，不切换窗口；最终唤起使用 NSWorkspace，不依赖该脚本。
+
+
+## 渠道临时粘贴（#55）
+
+- 文本通过 `ClipboardPasteService.withTextPaste(text)` 写入系统剪贴板，图片通过既有 `ImageClipboardSession.writePNG` 写入；内容和 `org.nspasteboard.TransientType` 在同一个 `NSPasteboardItem` 中一起发布。约定来源：https://nspasteboard.org/ 。不使用敏感信息标记代替临时内容标记。
+- 文本适配器随后只发送 ego Lite 原生 `keyboard.press('Meta+V')`，不再调用会重新写入剪贴板的 `keyboard.paste(text)`。保留页面聚焦、既有粘贴流程和回读核验。掘金的直接输入和各渠道文件上传不受影响。
+- 获取会话时保存原有条目和各类型数据；任何类型无法读取或读取期间剪贴板变化则停止，避免不完整快照覆盖原内容。成功、失败、取消均通过 defer 尝试恢复，只在 changeCount 仍属于本次操作时执行；新复制内容优先。
+- 临时标记是历史工具间的合作约定，不是 macOS 访问控制；无法保证不支持该标记的工具忽略。临时占用期间用户仍可能粘贴到临时内容。用户恰在发送粘贴快捷键期间复制的跨进程竞争也未被此标记消除。
+- 先前独立文字/PNG 测试中，用户提供的 echo 截图均未出现测试内容；这是标记过滤的验证，不等同于所有真实渠道已验收。
+
+### 本轮验证（2026-11-11）
+
+- 独立 scratch 构建 `.build/issue55-tests`，按本文 Swift Testing 参数运行全量测试：138 tests / 25 suites 通过（包含 opt-in 真实渠道测试的跳过，不代表这些现场场景通过）。专项覆盖文字/PNG 标记、成功和取消后恢复、多条目/HTML 表示保留、并发租约排他及保留用户新复制内容。
+- 临时集成程序链接本轮实际 PublishKit 编译对象，在独立 ego 测试页调用公共服务写入带标记的文字/PNG，再发送原生 `Meta+V`：页面 paste 事件收到完整多行文字及 `image/png` 文件。测试页已结束清理；没有向真实渠道填写或发布。
+- 尚未逐渠道进行本轮真实编辑器验收，未打包签名或重启应用，未修改 echo。
+- 0.20.1 提交复核：最终全量串行 138 tests / 25 suites 通过（184.954 秒）；差异和打包脚本语法检查通过。正式签名 release 构建、DMG 完整性、ZIP 解压验签、应用与构建版本、SHA256 及签名更新清单校验通过。本轮仅打包，未替换运行应用，未重新进行真实渠道交互验收。

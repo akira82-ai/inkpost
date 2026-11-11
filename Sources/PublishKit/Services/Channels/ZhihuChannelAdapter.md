@@ -29,3 +29,7 @@ Read this document before changing `ZhihuChannelAdapter.swift`. Common architect
 - PNG preparation contract (#30): AssetService prepares the complete ordered PNG batch before browser execution. Receive the unchanged original ChannelRequest and obtain final PNG upload paths through `context.uploadPaths(for:)`. Never convert formats, repair input, or fall back to original files in this adapter. DispatchService retains the same batch during login waits and resume. Clipboard writes copy validated PNG bytes unchanged.
 
 - Raw input contract (#9): body is plain text, including whitespace, line breaks and emoji. Preserve every character without rendering or content processing. Explicit HTML remains an unused compatibility field. Task-prepared PNG mappings stay separate from the original request.
+
+## Temporary clipboard writes (#55)
+
+Text paste uses `ClipboardPasteService.withTextPaste(text)` to write plain text and `org.nspasteboard.TransientType` in one pasteboard item, followed by native `Meta+V`. Do not call `keyboard.paste(text)` here: that would rewrite the marked clipboard. PNG clipboard uploads share the same marker and lease. Restore only while the app owns the pasteboard change count; never overwrite a newer user copy. This remains native paste, not direct DOM editing. Channel-specific live compatibility after this change still requires verification.

@@ -53,11 +53,11 @@ final class JikeChannelAdapter: ChannelAdapter {
         try validateImages(initial.images)
         try context.advance(.fillingContent)
         if initial.body.isEmpty {
-            _ = try await ClipboardPasteService.withTextPaste {
+            _ = try await ClipboardPasteService.withTextPaste(expectedBody(for: request)) {
                 try await context.bridge.run("""
                     // jike:paste-body
                     await page.click('\(Self.editor)', {label:'填写即刻想法正文'});
-                    await page.keyboard.paste(\(context.bridge.jsStr(expectedBody(for: request))));
+                    await page.keyboard.press('Meta+V');
                     cliLog(JSON.stringify({ok:true}));
                     """)
             }

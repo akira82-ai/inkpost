@@ -4,7 +4,7 @@
 
 2026-11-08，ego Lite 登录态实测 `https://weibo.com/` 顶部 `button[title="发微博"]`，点击进入「快捷发布」。
 限定正文定位：`.woo-modal-main .wbpro-layer textarea[placeholder="有什么新鲜事想分享给大家？"]`。
-打开面板后等待自动聚焦完成（动画开始时 activeElement 仍可能是按钮），再直接 `keyboard.paste`；不额外点击正文。
+打开面板后等待自动聚焦完成（动画开始时 activeElement 仍可能是按钮），再直接 `keyboard.press('Meta+V')`；不额外点击正文。
 每次操作前确认唯一快捷发布面板及标题；焦点因交接等原因丢失时，用原生 focus 恢复到已确认的面板正文，不能对任意 activeElement 粘贴。
 实测正文和两张 PNG 可连续原生粘贴，行首／行尾空格、空行和 emoji 保留。
 没有独立标题栏：标题非空时按「原始标题 + 一个换行 + 原始正文」组合后粘贴并校验；标题为空时只写原始正文，不新增换行。不 trim 标题或正文，兼容 HTML 不使用；原始 ChannelRequest 保持完整。
@@ -40,3 +40,7 @@
 离线进程替身调用真实适配器，覆盖正文、登录恢复、冲突、拒绝、取消、附件检查点、未知写入、超时及重排。
 `INKPOST_WEIBO_LIVE=1`、`INKPOST_WEIBO_LIVE_SPACE`、`INKPOST_WEIBO_LIVE_PAGE` 可运行真实页面填写／恢复测试，必须指定本任务专用 Page（首页可有旧草稿，快捷发布需为空），不发布。
 登录退出／上传中登录过期、实际网络故障和不同账号上限尚需专项验证，替身测试不等于真实故障回归。
+
+## Temporary clipboard writes (#55)
+
+Text paste uses `ClipboardPasteService.withTextPaste(text)` to write plain text and `org.nspasteboard.TransientType` in one pasteboard item, followed by native `Meta+V`. Do not call `keyboard.paste(text)` here: that would rewrite the marked clipboard. PNG clipboard uploads share the same marker and lease. Restore only while the app owns the pasteboard change count; never overwrite a newer user copy. This remains native paste, not direct DOM editing. Channel-specific live compatibility after this change still requires verification.

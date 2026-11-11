@@ -47,11 +47,11 @@ struct BilibiliChannelAdapterTests {
         if 'bilibili:clear-draft' in script:
             if mode!='clearFailed':state.update(title='',body='',images=[])
         if 'bilibili:paste-title' in script:
-            assert 'page.click' in script and 'keyboard.paste' in script
+            assert 'page.click' in script and "keyboard.press('Meta+V')" in script
             state['title']='' if mode=='unknownTitle' else \(String(reflecting: request.title))
             if mode=='unknownTitle':result={'ok':False,'error':'unknown title'}
         if 'bilibili:paste-body' in script:
-            assert 'page.click' in script and 'keyboard.paste' in script
+            assert 'page.click' in script and "keyboard.press('Meta+V')" in script
             state['body']='' if mode=='unknownBody' else \(String(reflecting: request.body))
             if mode=='unknownBody':result={'ok':False,'error':'unknown body'}
         if 'bilibili:add-image' in script:

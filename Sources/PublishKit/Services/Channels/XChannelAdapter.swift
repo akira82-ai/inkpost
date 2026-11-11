@@ -48,11 +48,11 @@ final class XChannelAdapter: ChannelAdapter {
         try validateImages(initial.images)
         try context.advance(.fillingContent)
         if initial.body.isEmpty {
-            _ = try await ClipboardPasteService.withTextPaste {
+            _ = try await ClipboardPasteService.withTextPaste(expected) {
                 try await context.bridge.run("""
                     // x:paste-body
                     \(Self.ensureFocus)
-                    await page.keyboard.paste(\(context.bridge.jsStr(expected)));
+                    await page.keyboard.press('Meta+V');
                     cliLog(JSON.stringify({ok:true}));
                     """)
             }

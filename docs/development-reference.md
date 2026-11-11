@@ -11,6 +11,15 @@
 
 ## 代码组织
 
+### 正文视觉折行（#54，2026-11-11）
+
+- `PasteEditor` 的原生编辑器初始 frame 使用 `NSScrollView.contentSize`，不再写死 384pt。滚动区域初始宽度为 0 时，原有固定宽度会被 autoresizing 保留为额外偏移，使文本在可见宽度之外才折行。继续使用系统 NSTextView 宽度跟随和段落布局，不对字符串插入换行。
+- 原生 NSHostingView/NSWindow 隔离验证通过：实际生产编辑控件粘贴中文、emoji、长英文与长链接，依次切换 300/480/240pt 可用宽度，检查编辑器与视口宽度一致、布局不横向溢出、行高随宽度变化，复制及模型文本保留手工换行、空行和空格，继续编辑正常。`ImagePasteTests` 5 项通过（0.182 秒），原有图片粘贴和焦点回归包含其中；日志 `/tmp/inkpost54-tests.log`。
+- release 验证包 `.build/Inkpost-issue54.app` 使用正式 Inkpost 身份 `4E15EF1D792EBC692CD2DE06AFC4F242B35D5A99` 构建，strict/deep 验签通过；日志 `/tmp/inkpost54-build.log`。当前正式应用有用户正文和三张图片，未停止或替换运行进程，未将旧进程作为新版本验收；实际正式窗口现场验证仍待用户稿件处理后进行。
+- 用户随后授权启动：通过项目脚本正式签名验签后停止旧进程、替换并启动 `.build/Inkpost-Compact.app`，旧包保留在 `.build/inkpost-previous.MtYvG8/Inkpost-Compact.app`，日志 `/tmp/inkpost54-launch.log`。启动前保留当时的 117 字正文与两张图片，启动后已按原顺序恢复，六个渠道选择不变；CUA 截图确认正式窗口正文在可见宽度内折行。未点击发布。
+
+- 0.19.1 提交复核：全量串行 132 tests / 24 suites 通过（185.252 秒）；差异和打包脚本语法检查通过。正式签名 release 构建、DMG 完整性、ZIP 解压验签、版本、SHA256 和签名更新清单校验通过。本轮仅打包，未替换运行应用，未重新操作真实平台。
+
 ### 全局快捷键（#37，2026-11-11）
 
 - `AppLifecycle` 持有一个 `ShortcutController`，主窗口安装完后开始注册，应用退出时停止。按键释放调用 `NativeMenuBar.toggleMainWindow()`，前台主窗口收起，其余状态复用 `showMainWindow()` 唤醒；不依赖分发服务或渠道适配器，仅编辑状态重新唤起时请求正文焦点。

@@ -1,10 +1,60 @@
 import AppKit
+import SwiftUI
 import Testing
 import UniformTypeIdentifiers
 @testable import PublishFlow
 
 @MainActor
 struct ImagePasteTests {
+    @Test func bodyWrapsToViewportWithoutChangingPastedOrCopiedText() async throws {
+        _ = NSApplication.shared
+        let source = "  中文🙂 " + String(repeating: "longword", count: 60)
+            + "\n\nhttps://example.com/" + String(repeating: "abcdef", count: 60) + "  \n"
+        var modelText = ""
+        let host = NSHostingView(rootView: PasteEditor(
+            text: Binding(get: { modelText }, set: { modelText = $0 }), enabled: true,
+            onImages: { _ in }, onFiles: { _ in }))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 150),
+                              styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        await Task.yield()
+        func findScroll(_ view: NSView) -> NSScrollView? {
+            if let scroll = view as? NSScrollView { return scroll }
+            return view.subviews.lazy.compactMap { findScroll($0) }.first
+        }
+        let scroll = try #require(findScroll(host))
+        let view = try #require(scroll.documentView as? ImagePasteTextView)
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        board.setString(source, forType: .string)
+        #expect(view.readSelection(from: board, type: .string))
+        let layout = try #require(view.layoutManager)
+        let container = try #require(view.textContainer)
+        var heights: [CGFloat] = []
+        for width in [300.0, 480.0, 240.0] {
+            window.setContentSize(NSSize(width: width, height: 150))
+            host.layoutSubtreeIfNeeded()
+            scroll.layoutSubtreeIfNeeded()
+            layout.ensureLayout(for: container)
+            #expect(abs(view.frame.width - scroll.contentSize.width) < 1)
+            #expect(layout.usedRect(for: container).maxX <= scroll.contentSize.width + 1)
+            heights.append(layout.usedRect(for: container).height)
+            #expect(view.string == source)
+            #expect(modelText == source)
+        }
+        #expect(heights[1] < heights[0])
+        #expect(heights[2] > heights[0])
+        view.setSelectedRange(NSRange(location: 0, length: (source as NSString).length))
+        #expect(view.writeSelection(to: board, types: view.writablePasteboardTypes))
+        #expect(board.string(forType: .string) == source)
+        view.setSelectedRange(NSRange(location: (source as NSString).length, length: 0))
+        view.insertText("继续编辑🙂", replacementRange: view.selectedRange())
+        layout.ensureLayout(for: container)
+        #expect(modelText == source + "继续编辑🙂")
+        #expect(layout.usedRect(for: container).maxX <= scroll.contentSize.width + 1)
+    }
+
     private func editor() -> ImagePasteTextView {
         let view = ImagePasteTextView(frame: NSRect(x: 0, y: 0, width: 384, height: 150))
         view.isRichText = false

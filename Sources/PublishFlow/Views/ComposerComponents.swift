@@ -106,7 +106,8 @@ struct PasteEditor: NSViewRepresentable {
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = false
-        let editor = ImagePasteTextView(frame: NSRect(x: 0, y: 0, width: 384, height: 150))
+        // Match the initial clip width so autoresizing does not preserve a fixed width offset.
+        let editor = ImagePasteTextView(frame: NSRect(origin: .zero, size: scroll.contentSize))
         editor.delegate = context.coordinator; editor.isRichText = false
         editor.font = NSFont(name: "Avenir Next", size: 13) ?? .systemFont(ofSize: 13)
         editor.textColor = NSColor(red: 37/255, green: 41/255, blue: 35/255, alpha: 1)

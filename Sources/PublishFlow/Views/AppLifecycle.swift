@@ -8,6 +8,7 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, UNUserNotificationCen
     private var pendingNotificationRoutes: [(UUID?, Int?)] = []
     private var menuBar: NativeMenuBar?
     private var updates: UpdateController?
+    let shortcuts = ShortcutController()
     func configureUpdates(_ updates: UpdateController) { self.updates = updates }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if let updates, updates.state.installSessionActive, let reason = updates.blockingReason {
@@ -25,6 +26,7 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, UNUserNotificationCen
         pendingNotificationRoutes = []
         Task { for (taskID, workspaceID) in pending { await self.openNotification(taskID: taskID, workspaceID: workspaceID) } }
         menuBar = NativeMenuBar(controller: controller, presentation: presentation, openSettings: openSettings, window: window, updates: updates)
+        shortcuts.start { [weak self] in self?.menuBar?.toggleMainWindow() }
         showMainWindow()
         ApplicationStartup.instance?.whenReady(activate: { [weak self] in
             guard let self, let menuBar = self.menuBar else { return false }
@@ -33,6 +35,7 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, UNUserNotificationCen
         }, stop: { NSApp.terminate(nil) })
     }
     func applicationWillTerminate(_ notification: Notification) {
+        shortcuts.stop()
         ApplicationStartup.instance?.stopListening()
         menuBar?.stop()
     }

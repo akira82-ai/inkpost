@@ -12,7 +12,7 @@ fi
 swift build -c "$CONFIG" --scratch-path "$SCRATCH"
 BIN_DIR="$(swift build -c "$CONFIG" --scratch-path "$SCRATCH" --show-bin-path)"
 APP="${INKPOST_APP_OUTPUT:-.build/Inkpost-Compact.app}"
-VERSION="${INKPOST_APP_VERSION:-0.18.1}"
+VERSION="${INKPOST_APP_VERSION:-0.19.0}"
 BUILD_VERSION="${INKPOST_BUILD_VERSION:-$VERSION}"
 [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ && "$BUILD_VERSION" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] || { echo "Invalid app/build version" >&2; exit 1; }
 # Do not overwrite the running executable/resources before the replacement has passed signing.
@@ -33,7 +33,7 @@ cat > "$STAGED_APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIconFile</key><string>Inkpost.icns</string>
 <key>CFBundleExecutable</key><string>PublishFlow</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.18.1</string>
+<key>CFBundleShortVersionString</key><string>0.19.0</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 <key>LSUIElement</key><true/>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
@@ -48,6 +48,8 @@ FRAMEWORK="$SCRATCH/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x8
 mkdir -p "$STAGED_APP/Contents/Frameworks"
 ditto "$FRAMEWORK" "$STAGED_APP/Contents/Frameworks/Sparkle.framework"
 cp Sources/PublishFlow/Sparkle-LICENSE.txt "$STAGED_APP/Contents/Resources/"
+cp Sources/PublishFlow/KeyboardShortcuts-LICENSE.txt "$STAGED_APP/Contents/Resources/"
+cp -R "$BIN_DIR/KeyboardShortcuts_KeyboardShortcuts.bundle" "$STAGED_APP/Contents/Resources/"
 # Re-sign nested code inside-out using the configured identity; preserve helper entitlements.
 FRAMEWORK_COPY="$STAGED_APP/Contents/Frameworks/Sparkle.framework"
 while IFS= read -r -d '' nested; do

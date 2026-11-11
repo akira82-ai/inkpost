@@ -5,7 +5,8 @@ let package = Package(
     name: "PublishFlow",
     platforms: [.macOS(.v14)],
     dependencies: [
-        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.1")
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.1"),
+        .package(path: "Vendor/KeyboardShortcuts")
     ],
     targets: [
         // 核心库：协议模型、本地存储、EgoLite 引擎
@@ -20,8 +21,9 @@ let package = Package(
         // SwiftUI App
         .executableTarget(
             name: "PublishFlow",
-            dependencies: ["PublishKit", .product(name: "Sparkle", package: "Sparkle")],
-            resources: [.copy("Sparkle-LICENSE.txt")],
+            dependencies: ["PublishKit", .product(name: "Sparkle", package: "Sparkle"),
+                           .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts")],
+            resources: [.copy("Sparkle-LICENSE.txt"), .copy("KeyboardShortcuts-LICENSE.txt")],
             linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
         ),
         // CLI 冒烟/演示工具

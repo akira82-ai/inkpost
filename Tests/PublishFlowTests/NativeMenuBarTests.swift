@@ -125,7 +125,8 @@ struct NativeMenuBarTests {
         let focus = presentation.bodyFocusRequest
         bar.item.button?.performClick(nil)
         #expect(bar.mainWindow.isVisible)
-        #expect(presentation.bodyFocusRequest != focus)
+        // Non-editable task states must not steal focus into the body editor.
+        #expect(presentation.bodyFocusRequest == focus)
     }
 
     @Test func mainWindowIsOrdinaryAndCanBeCovered() async throws {

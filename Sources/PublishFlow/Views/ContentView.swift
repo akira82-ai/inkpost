@@ -6,9 +6,11 @@ struct ContentView: View {
     let model: DispatchModel
     let controller: DispatchController
     var updates: UpdateController? = nil
+    var shortcuts: ShortcutController? = nil
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("设置").font(.custom("Songti SC", size: 26))
+            if let shortcuts { ShortcutSettings(controller: shortcuts) }
             Text("渠道能力").font(InkStyle.font(13, weight: .semibold))
             Text("账号登录状态在填写时检查。内容编辑、渠道选择与任务操作统一在主窗口完成。")
                 .font(InkStyle.font(12)).foregroundStyle(InkStyle.muted)

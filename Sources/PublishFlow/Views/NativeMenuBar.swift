@@ -186,13 +186,27 @@ final class NativeMenuBar: NSObject, NSWindowDelegate {
         return image
     }
 
-    /// All explicit entry points come here, including clicks while covered or on another Space.
+    /// A global shortcut hides only the foreground main window. A covered window
+    /// must be brought forward rather than hidden out from under another app.
+    func toggleMainWindow() {
+        if mainWindow.isVisible && !mainWindow.isMiniaturized && mainWindow.isOnActiveSpace
+            && NSApp.isActive && mainWindow.isKeyWindow {
+            hideMainWindow()
+        } else {
+            showMainWindow()
+        }
+    }
+
+    /// Explicit show operations share this entry, including covered or other-Space windows.
     @objc func showMainWindow() {
+        let alreadyFocused = NSApp.isActive && mainWindow.isKeyWindow && mainWindow.isOnActiveSpace
         // Order before activation so the window moves here instead of activating its old Space.
         if !mainWindow.isVisible || !mainWindow.isOnActiveSpace { positionMainWindow() }
         mainWindow.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        presentation.bodyFocusRequest = UUID()
+        if !alreadyFocused && controller.state.overallPhase == .pending {
+            presentation.bodyFocusRequest = UUID()
+        }
     }
 
     private func positionMainWindow() {

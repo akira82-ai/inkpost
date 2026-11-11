@@ -11,6 +11,21 @@
 
 ## 代码组织
 
+### 全局快捷键（#37，2026-11-11）
+
+- `AppLifecycle` 持有一个 `ShortcutController`，主窗口安装完后开始注册，应用退出时停止。按键释放调用 `NativeMenuBar.toggleMainWindow()`，前台主窗口收起，其余状态复用 `showMainWindow()` 唤醒；不依赖分发服务或渠道适配器，仅编辑状态重新唤起时请求正文焦点。
+- 设置复用 KeyboardShortcuts 的 binding 录入控件，不启用库的全局监听。`GlobalHotKey` 用系统 `RegisterEventHotKey`/`UnregisterEventHotKey` 完成实际注册并暴露 OSStatus 错误；不使用事件截取或权限弹窗。录入期间根据库的录入通知暂停自有注册，避免原组合键被系统消费；该通知是固定版本的内部协议，升级必须复核录入与取消测试。
+- 配置以 `KeyboardShortcuts.Shortcut?` JSON 保存于 `Inkpost.wakeShortcut`，明确保存的 null 表示停用，缺少配置才采用默认键。损坏配置提示重新设置，不静默恢复默认键；注册失败保持设置并提示，不伪报已启用。
+- 第三方来源：`https://github.com/sindresorhus/KeyboardShortcuts`，版本 3.1.0，提交 `772133d9dbe800fdac0473226822994c5c162c58`，MIT 许可证。在 `Vendor/KeyboardShortcuts` 保留构建所需源码、语言资源与 license；应用包同时附带许可证及资源 bundle。
+- 采用本地依赖的原因：CLT 6.2.3 缺少 SwiftUIMacros 和 PreviewsMacros。仅在 `ConflictPolicy.swift` 将 `@Entry` 等价展开为 EnvironmentKey，`Recorder.swift` 的三个 Xcode 预览放在 `INKPOST_XCODE_PREVIEWS` 条件中；依赖清单移除未随库引入的上游测试目标。未改变录入器产品行为。升级时与上述上游提交比较这三处差异，不能直接改 `.build/checkouts`。
+- 方案选择：复用成熟录入与校验，保留少量可观测的系统注册衔接，避免重复实现录入器，也避免把库内部未公开的注册结果当成成功。默认组合键由用户确认，不采用库“不预设组合键”的产品建议。
+- 验证：快捷键与窗口专项 14 tests / 2 suites 通过；最终完整串行回归 130 tests / 24 suites 通过（187.798 秒），真实平台 live 测试未启用。覆盖默认键、修改/显式停用及恢复配置、损坏配置、注册失败/重试、录入暂停与恢复、真实 Carbon 重复注册失败及解绑释放、六种任务阶段保留原窗口/原稿/任务。
+- 正式 Inkpost 身份 `4E15EF1D792EBC692CD2DE06AFC4F242B35D5A99` release 构建、strict/deep 验签和脚本替换启动通过；旧包保留在 `.build/inkpost-previous.2ydDZT/Inkpost-Compact.app`。原生自动化确认设置显示默认 `⌘'` 和已启用，实际录入 `⌃⌥⌘M`、清除停用、恢复默认键成功；访达窗口前台触发默认键后，系统前台身份从 `com.apple.finder` 变为 `com.publishflow.app`，测试标题仍在且正文获焦。测试稿已清空，渠道选择未改动，未填写或发布真实社媒内容。
+- 未现场覆盖跨桌面、全屏、多显示器、真实在途渠道任务和系统权限全新账户；任务状态保留以自动化测试为证据，窗口跨桌面沿用既有入口，不将配置值当作现场验收。测试日志 `/tmp/inkpost37-tests.log`、`/tmp/inkpost37-regression.log`，构建日志 `/tmp/inkpost37-build.log`。初次沙箱测试被 Swift 缓存写入权限阻止；直接上游依赖构建暴露 CLT 缺少宏插件，已按上述方式适配并重新验证。
+- 后续用户修正为显示／隐藏切换：新增 `toggleMainWindow()`，以当前桌面、应用激活且主窗口为 key window 判断前台；满足时复用收起，否则复用唤醒。专项复测 15 tests / 2 suites 通过（3.075 秒），包含遮挡窗口应唤醒、六种任务阶段切换不改变任务和内容。正式签名 release 构建及替换启动通过，旧包保留在 `.build/inkpost-previous.5GLJ1A/Inkpost-Compact.app`，运行 PID 98777。日志 `/tmp/inkpost37-toggle-tests.log`、`/tmp/inkpost37-toggle-build.log`。该修正版未重跑前述全量测试；原生自动化未能稳定保持目标窗口在前台，未确认真实连续按键的隐藏／再显示效果，不将本次输入尝试记为通过。
+
+- 0.19.0 提交复核：切换行为修正版全量串行 131 tests / 24 suites 通过（186.326 秒）；差异及打包脚本语法检查通过。正式签名 release 构建、DMG 完整性、ZIP 解压验签、快捷键许可证与资源 bundle、版本、SHA256 和签名更新清单校验通过。仅打包，未替换运行应用；上述原生现场验收边界仍保留。
+
 ### 分发输入首尾空白（#51，2026-11-11）
 
 - `DispatchController.dispatch()` 创建共享任务快照时，对整段标题和正文各调用一次 `trimmingCharacters(in: .whitespacesAndNewlines)`；不逐行处理，不修改编辑状态。各渠道及登录恢复复用该快照，HTML 和有序素材不变。
@@ -60,7 +75,7 @@ Scripts/prepare-update.sh .build/Inkpost-Release.app /新的产物目录 /更新
 
 - SwiftUI `Window(id: "main")` 持有唯一发布窗口；`NativeMenuBar` 必须接收该窗口，不备用创建另一套编辑器。设置使用独立 Settings scene。
 - 打包 `LSUIElement=true`，`applicationWillFinishLaunching` 设置 `.accessory`，不再运行时切回 `.regular`。这会隐藏 Dock 图标，不改变发布窗口的普通排序职责。
-- 菜单栏、应用内 Command-0、重新打开应用及通知错误回退统一调用 `showMainWindow()`。点击菜单栏始终唤醒，不按 `isVisible` 切换隐藏。全局快捷键注册尚未实现。
+- 菜单栏、应用内 Command-0、重新打开应用及通知错误回退统一调用 `showMainWindow()`。点击菜单栏始终唤醒，不按 `isVisible` 切换隐藏。全局快捷键的切换行为见 #37 小节。
 - 主窗口 `.normal`、`hidesOnDeactivate=false`、禁用窗口标签页；`.moveToActiveSpace` 在显式唤起时迁移窗口，`.fullScreenAuxiliary` 请求允许全屏辅助呈现，并禁止参与全屏平铺；其他应用全屏及多显示器效果仍需实测。先将目标窗口排序到前，再激活应用一次；不使用全桌面常驻、浮动层级或循环抢焦点。
 - 设置不参与主窗口唤醒。红黄标题栏按钮隐藏主窗口，任务只在首次实际执行时隐藏一次；失焦、Escape、进度和终态没有隐藏监听。
 - 历史原型 `inpost-prototype-简约模式.html` 和旧开发计划仅供追溯。当前窗口交互原型为 `inkpost-titlebar.html`，系统桌面与 Dock 行为必须在原生验证。

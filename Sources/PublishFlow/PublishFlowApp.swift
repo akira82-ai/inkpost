@@ -30,7 +30,7 @@ struct PublishFlowApp: App {
             }
         }
         Settings {
-            DispatchRootView(controller: controller, updates: updates)
+            DispatchRootView(controller: controller, updates: updates, shortcuts: lifecycle.shortcuts)
         }
     }
 }

@@ -5,9 +5,11 @@ import AppKit
 final class WindowRevealView: NSView {
     private let image: NSImage
     private let titleHeight: CGFloat
+    private let anchorX: CGFloat
     var elapsed: TimeInterval = 0 { didSet { needsDisplay = true } }
 
-    init(frame: NSRect, image: NSImage, titleHeight: CGFloat) {
+    init(frame: NSRect, image: NSImage, titleHeight: CGFloat, anchorX: CGFloat? = nil) {
+        self.anchorX = anchorX ?? frame.width - 54
         self.image = image
         self.titleHeight = titleHeight
         super.init(frame: frame)
@@ -16,12 +18,19 @@ final class WindowRevealView: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    static func shellFrame(in bounds: NSRect, anchorX: CGFloat, progress: CGFloat) -> NSRect {
+        let initialWidth = min(108, bounds.width)
+        let initialX = min(max(anchorX - initialWidth / 2, bounds.minX), bounds.maxX - initialWidth)
+        let width = initialWidth + (bounds.width - initialWidth) * progress
+        let height = 38 + (bounds.height - 38) * progress
+        return NSRect(x: initialX + (bounds.minX - initialX) * progress,
+                      y: bounds.maxY - height, width: width, height: height)
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         let t = min(1, elapsed / 0.42)
         let progress = t == 1 ? 1 : 1 - exp(-8 * t) * (cos(4 * t) + 2 * sin(4 * t))
-        let width = 108 + (bounds.width - 108) * progress
-        let height = 38 + (bounds.height - 38) * progress
-        let shell = NSRect(x: bounds.maxX - width, y: bounds.maxY - height, width: width, height: height)
+        let shell = Self.shellFrame(in: bounds, anchorX: anchorX, progress: progress)
         let radius = 19 - 7 * progress
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(roundedRect: shell, xRadius: radius, yRadius: radius).addClip()

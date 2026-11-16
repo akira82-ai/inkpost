@@ -11,6 +11,7 @@ final class NativeMenuBar: NSObject, NSWindowDelegate {
     let item: NSStatusItem
     let mainWindow: NSWindow
     let revealAnimator = WindowRevealAnimator()
+    private var revealAnchorX: CGFloat?
     private let controller: DispatchController
     private let presentation: TaskPresentation
     private let showSettings: () -> Void
@@ -213,7 +214,7 @@ final class NativeMenuBar: NSObject, NSWindowDelegate {
             .notice("Show requested: visible=\(self.mainWindow.isVisible), focused=\(alreadyFocused), reveal=\(shouldReveal)")
         // Order before activation so the window moves here instead of activating its old Space.
         if !mainWindow.isVisible || !mainWindow.isOnActiveSpace { positionMainWindow() }
-        if shouldReveal { revealAnimator.prepare(mainWindow) }
+        if shouldReveal { revealAnimator.prepare(mainWindow, anchorX: revealAnchorX) }
         mainWindow.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         revealAnimator.start()
@@ -225,7 +226,9 @@ final class NativeMenuBar: NSObject, NSWindowDelegate {
     private func positionMainWindow() {
         let anchorWindow = item.button?.window
         let anchor = item.button.flatMap { button in
-            anchorWindow?.convertToScreen(button.convert(button.bounds, to: nil))
+            let imageRect = button.cell?.imageRect(forBounds: button.bounds) ?? button.bounds
+            return anchorWindow?.convertToScreen(button.convert(NSRect(x: imageRect.minX, y: button.bounds.minY,
+                width: min(22, imageRect.width), height: button.bounds.height), to: nil))
         }
         let screen = anchorWindow?.screen ?? NSScreen.main
         guard let visible = screen?.visibleFrame else { return }
@@ -234,7 +237,11 @@ final class NativeMenuBar: NSObject, NSWindowDelegate {
         let width = min(420, visible.width - 24)
         let titleHeight = mainWindow.frame.height - mainWindow.contentLayoutRect.height
         let height = min(max(1, fitting.height) + titleHeight, visible.height - 16)
-        let x = min(max((anchor?.midX ?? visible.midX) - width / 2, visible.minX + 8), visible.maxX - width - 8)
+        let iconX = anchor?.midX ?? visible.midX
+        // Keep the capsule centered under the glyph and grow toward available space.
+        let preferredX = iconX > visible.midX ? iconX - width + 54 : iconX - 54
+        let x = min(max(preferredX, visible.minX + 12), visible.maxX - width - 12)
+        revealAnchorX = iconX
         let y = max(visible.minY + 8, min(anchor?.minY ?? visible.maxY, visible.maxY) - 8 - height)
         mainWindow.setFrame(NSRect(x: x, y: y, width: width, height: height), display: true)
     }

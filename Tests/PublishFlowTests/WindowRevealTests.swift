@@ -6,6 +6,18 @@ import PublishKit
 
 @MainActor
 struct WindowRevealTests {
+    @Test func capsuleTracksIconAndExpandsInsideWindowBounds() {
+        let bounds = NSRect(x: 0, y: 0, width: 420, height: 560)
+        for anchor: CGFloat in [12, 54, 210, 366, 408] {
+            let initial = WindowRevealView.shellFrame(in: bounds, anchorX: anchor, progress: 0)
+            if anchor >= 54 && anchor <= 366 { #expect(initial.midX == anchor) }
+            #expect(bounds.contains(initial))
+            let middle = WindowRevealView.shellFrame(in: bounds, anchorX: anchor, progress: 0.5)
+            #expect(bounds.contains(middle))
+            #expect(middle.maxY == bounds.maxY)
+            #expect(WindowRevealView.shellFrame(in: bounds, anchorX: anchor, progress: 1) == bounds)
+        }
+    }
     private func makeWindow() -> NSWindow {
         _ = NSApplication.shared
         let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 420, height: 500),

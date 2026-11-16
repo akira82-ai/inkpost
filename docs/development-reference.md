@@ -244,3 +244,7 @@ swift test --no-parallel \
 
 - 后续修复（同日）：用户反馈点击菜单栏／快捷键看不到动画。正式应用日志复现：SwiftUI 在窗口置前后发送 `NSWindowDidResizeNotification`，旧逻辑在 11ms 终止动画；此前测试只检查最终状态，遗漏了中途持续播放。现改为在内容尺寸调整后重取原尺寸快照并同步绘制窗口，保留原时钟；增加布局后 80ms 仍播放、最终尺寸及透明度恢复的回归测试，并保留 `window-reveal` 分类日志用于区分跳过／正常完成／中断。
 - 修复验证：窗口、快捷键及动效专项 20 tests / 3 suites 通过（4.584 秒，`/tmp/inkpost53-resize-tests.log`）。正式签名 release 替换 `/Applications/Inkpost.app`，备份 `.build/inkpost-previous.0fCavI/Inkpost-Compact.app`，PID 83614。原生 UI 操作关闭后使用应用内 `⌘0` 唤起，生产日志确认经历内容尺寸调整且持续 433.956ms 后正常完成，界面与正文焦点恢复；菜单栏与全局快捷键复用同一入口，但本次未单独现场触发这两个入口。构建日志 `/tmp/inkpost53-resize-build.log`。未重新跑无关渠道的全量回归，未提交／推送。
+
+- 图标锚点优化（2026-11-16）：定位以状态栏按钮 cell 的图片区域内「墨」字前 22pt 为锚点，不使用带进度文案的整个按钮中心。图标在屏幕右半边时窗口向左下展开、左半边向右下展开，左右安全边距 12pt；胶囊中心跟随该屏幕坐标，动画结束恰好覆盖真实窗口。受边界限制时钳制胶囊位置以优先完整可见；布局快照更新继续携带同一个屏幕锚点。
+- 0.21.1 提交复核：最终全量串行 144 tests / 26 suites 通过（187.440 秒）；差异及打包脚本语法检查通过。正式签名 release 构建、DMG 完整性、ZIP 解压验签、应用与构建版本、SHA256 和签名更新清单通过。真实社交平台及多显示器等现场边界未在本轮重验。
+- 验证：窗口／快捷键／动效专项 21 tests / 3 suites 通过（4.412 秒），新增五种左右及边界锚点的起点、过程不越界和最终几何断言。正式 Inkpost 签名 release 构建及安装通过，旧包 `.build/inkpost-previous.U9Mf5t/Inkpost-Compact.app`，新版从 `/Applications/Inkpost.app` 启动；原生 UI 操作唤起后确认画面恢复与正文焦点正常。尚未现场逐项验证多显示器、全屏和菜单栏自动隐藏。日志 `/tmp/inkpost53-anchor-tests.log`、`/tmp/inkpost53-anchor-build.log`。

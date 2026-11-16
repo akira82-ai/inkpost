@@ -12,11 +12,13 @@ final class WindowRevealAnimator {
     private let logger = Logger(subsystem: "com.publishflow.app", category: "window-reveal")
     private var startedAt: TimeInterval?
     private var refreshing = false
+    private var anchorX: CGFloat?
     private(set) var isRunning = false
 
-    func prepare(_ window: NSWindow) {
+    func prepare(_ window: NSWindow, anchorX: CGFloat? = nil) {
         finish()
         self.window = window
+        self.anchorX = anchorX
         guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
               let frameView = window.contentView?.superview else { return }
         frameView.layoutSubtreeIfNeeded()
@@ -29,7 +31,8 @@ final class WindowRevealAnimator {
         image.addRepresentation(bitmap)
         let drawing = WindowRevealView(frame: NSRect(origin: .zero, size: window.frame.size),
                                        image: image,
-                                       titleHeight: window.frame.height - window.contentLayoutRect.height)
+                                       titleHeight: window.frame.height - window.contentLayoutRect.height,
+                                       anchorX: self.anchorX.map { $0 - window.frame.minX })
         let surface = NSWindow(contentRect: window.frame, styleMask: .borderless,
                                backing: .buffered, defer: false)
         surface.isReleasedWhenClosed = false
@@ -104,7 +107,8 @@ final class WindowRevealAnimator {
         let image = NSImage(size: frameView.bounds.size)
         image.addRepresentation(bitmap)
         let drawing = WindowRevealView(frame: NSRect(origin: .zero, size: window.frame.size), image: image,
-                                       titleHeight: window.frame.height - window.contentLayoutRect.height)
+                                       titleHeight: window.frame.height - window.contentLayoutRect.height,
+                                       anchorX: self.anchorX.map { $0 - window.frame.minX })
         drawing.elapsed = startedAt.map { ProcessInfo.processInfo.systemUptime - $0 } ?? 0
         surface.setFrame(window.frame, display: true)
         surface.contentView = drawing

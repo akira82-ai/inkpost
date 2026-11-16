@@ -3,12 +3,14 @@ import CoreText
 import SwiftUI
 import Observation
 import PublishKit
+import OSLog
 
 /// Own the status button directly: animation never re-renders a SwiftUI label or its layout.
 @MainActor
 final class NativeMenuBar: NSObject, NSWindowDelegate {
     let item: NSStatusItem
     let mainWindow: NSWindow
+    let revealAnimator = WindowRevealAnimator()
     private let controller: DispatchController
     private let presentation: TaskPresentation
     private let showSettings: () -> Void
@@ -66,7 +68,12 @@ final class NativeMenuBar: NSObject, NSWindowDelegate {
         accessibilityObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.updateAnimation() }
+            MainActor.assumeIsolated {
+                self?.updateAnimation()
+                if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                    self?.revealAnimator.finish()
+                }
+            }
         }
         appearanceObservation = button.observe(\.effectiveAppearance) { [weak self] _, _ in
             Task { @MainActor [weak self] in self?.updateAnimation() }
@@ -199,11 +206,17 @@ final class NativeMenuBar: NSObject, NSWindowDelegate {
 
     /// Explicit show operations share this entry, including covered or other-Space windows.
     @objc func showMainWindow() {
+        if revealAnimator.isRunning { revealAnimator.finish() }
         let alreadyFocused = NSApp.isActive && mainWindow.isKeyWindow && mainWindow.isOnActiveSpace
+        let shouldReveal = !mainWindow.isVisible || mainWindow.isMiniaturized || !mainWindow.isOnActiveSpace
+        Logger(subsystem: "com.publishflow.app", category: "window-reveal")
+            .notice("Show requested: visible=\(self.mainWindow.isVisible), focused=\(alreadyFocused), reveal=\(shouldReveal)")
         // Order before activation so the window moves here instead of activating its old Space.
         if !mainWindow.isVisible || !mainWindow.isOnActiveSpace { positionMainWindow() }
+        if shouldReveal { revealAnimator.prepare(mainWindow) }
         mainWindow.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        revealAnimator.start()
         if !alreadyFocused && controller.state.overallPhase == .pending {
             presentation.bodyFocusRequest = UUID()
         }
@@ -227,6 +240,7 @@ final class NativeMenuBar: NSObject, NSWindowDelegate {
     }
 
     private func hideMainWindow() {
+        revealAnimator.finish()
         mainWindow.orderOut(nil)
     }
 
@@ -239,6 +253,7 @@ final class NativeMenuBar: NSObject, NSWindowDelegate {
     }
 
     func stop() {
+        revealAnimator.finish()
         observing = false
         pulseTimer?.invalidate()
         pulseTimer = nil

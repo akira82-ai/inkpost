@@ -53,6 +53,12 @@
 
 ## Main window implementation
 
+### 窗口唤起动效（#53）
+
+- 已确认采用 [连续形变原型](../prototypes/inkpost-window-reveal.html)：紧凑「墨驿」胶囊以同一外壳向左下展开为发布窗口，标题保持连续，内容稍后淡入；不对整张窗口及文字做整体缩放。
+- 参考 Kokonut UI Morph Popover；网页原型展开约 420ms、内容淡入约 200ms，作为原生实现的视觉参考，最终节奏需原生验收。尊重系统减少动态效果设置，窗口已显示时不重复播放，中断或再次唤起时不叠加动画。
+- 动效不改变当前桌面唤起、普通窗口层级、稿件保留及既有显示／隐藏规则。原生使用短暂、不可交互的展示外壳，完成后移除，编辑器始终为原来的同一个窗口；实现与验证状态记录在开发参考中，原型通过不代表原生现场验收通过。
+
 - 墨驿在当前用户下仅允许一个应用进程实例，涵盖正常打开、直接执行和不同路径副本。重复启动唤起已有主窗口，不清空内容、修改渠道或重新启动任务；并发启动同样互斥。异常退出后可重新启动；已有实例无法响应时明确提示，不强杀旧实例或启动第二套发布界面。短暂的启动检查不创建编辑状态、任务或菜单栏图标。
 - Inkpost has one ordinary NSWindow at normal level using the former compact layout. No compact/full publishing mode or second editor. The former workspace is Settings only; do not add configuration capabilities during this migration.
 - Use the native titlebar with title 墨驿, visible standard close/minimize buttons and a disabled gray zoom button; no resizing or fullscreen. Close and minimize both hide the main window without quitting, cancelling, or minimizing to Dock. The right gear opens Settings.

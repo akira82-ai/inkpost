@@ -147,8 +147,22 @@ struct ShortcutTests {
         bar.showMainWindow()
         other.makeKeyAndOrderFront(nil)
         #expect(!window.isKeyWindow)
+        dispatch.state.markdown = "Keep this draft"
         bar.toggleMainWindow()
         #expect(window.isVisible)
-        if NSApp.isActive { #expect(window.isKeyWindow) }
+        if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            #expect(bar.revealAnimator.isRunning)
+            #expect(window.alphaValue == 0)
+        }
+        #expect(dispatch.state.markdown == "Keep this draft")
+        #expect(window.level == .normal)
+        if NSApp.isActive {
+            #expect(window.isKeyWindow)
+            bar.revealAnimator.finish()
+            bar.showMainWindow()
+            #expect(!bar.revealAnimator.isRunning)
+            bar.toggleMainWindow()
+            #expect(!window.isVisible)
+        }
     }
 }

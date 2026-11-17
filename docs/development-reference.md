@@ -248,3 +248,7 @@ swift test --no-parallel \
 - 图标锚点优化（2026-11-16）：定位以状态栏按钮 cell 的图片区域内「墨」字前 22pt 为锚点，不使用带进度文案的整个按钮中心。图标在屏幕右半边时窗口向左下展开、左半边向右下展开，左右安全边距 12pt；胶囊中心跟随该屏幕坐标，动画结束恰好覆盖真实窗口。受边界限制时钳制胶囊位置以优先完整可见；布局快照更新继续携带同一个屏幕锚点。
 - 0.21.1 提交复核：最终全量串行 144 tests / 26 suites 通过（187.440 秒）；差异及打包脚本语法检查通过。正式签名 release 构建、DMG 完整性、ZIP 解压验签、应用与构建版本、SHA256 和签名更新清单通过。真实社交平台及多显示器等现场边界未在本轮重验。
 - 验证：窗口／快捷键／动效专项 21 tests / 3 suites 通过（4.412 秒），新增五种左右及边界锚点的起点、过程不越界和最终几何断言。正式 Inkpost 签名 release 构建及安装通过，旧包 `.build/inkpost-previous.U9Mf5t/Inkpost-Compact.app`，新版从 `/Applications/Inkpost.app` 启动；原生 UI 操作唤起后确认画面恢复与正文焦点正常。尚未现场逐项验证多显示器、全屏和菜单栏自动隐藏。日志 `/tmp/inkpost53-anchor-tests.log`、`/tmp/inkpost53-anchor-build.log`。
+
+- 后台唤回修复（2026-11-17）：窗口 `visible=true, focused=false` 时旧判断跳过动画。现后台、非 key 或非当前桌面唤回均重新对齐菜单栏并播放；已在前台不重播，前台快捷键仍收起。README 和产品需求同步。窗口／快捷键／动效 21 tests / 3 suites 通过（4.960 秒），覆盖遮挡后快捷键启动动画、稿件保留与普通层级。正式签名构建及替换启动通过，旧包 `.build/inkpost-previous.Vuuzjx/Inkpost-Compact.app`；原生 UI 确认窗口及正文焦点正常。未现场等待长时间或跨桌面复测。日志 `/tmp/inkpost53-covered-tests.log`、`/tmp/inkpost53-covered-build.log`。未提交／推送。
+
+- 0.21.2 delivery checks: 144 tests / 26 suites passed serially (187.359s). Release build, formal code signature, DMG integrity, extracted ZIP signature, version, SHA256 and signed appcast checks passed. Cross-Space and long-running background scenarios were not revalidated live.

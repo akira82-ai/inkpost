@@ -209,11 +209,11 @@ final class NativeMenuBar: NSObject, NSWindowDelegate {
     @objc func showMainWindow() {
         if revealAnimator.isRunning { revealAnimator.finish() }
         let alreadyFocused = NSApp.isActive && mainWindow.isKeyWindow && mainWindow.isOnActiveSpace
-        let shouldReveal = !mainWindow.isVisible || mainWindow.isMiniaturized || !mainWindow.isOnActiveSpace
+        let shouldReveal = !alreadyFocused || !mainWindow.isVisible || mainWindow.isMiniaturized
         Logger(subsystem: "com.publishflow.app", category: "window-reveal")
             .notice("Show requested: visible=\(self.mainWindow.isVisible), focused=\(alreadyFocused), reveal=\(shouldReveal)")
         // Order before activation so the window moves here instead of activating its old Space.
-        if !mainWindow.isVisible || !mainWindow.isOnActiveSpace { positionMainWindow() }
+        if shouldReveal { positionMainWindow() }
         if shouldReveal { revealAnimator.prepare(mainWindow, anchorX: revealAnchorX) }
         mainWindow.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)

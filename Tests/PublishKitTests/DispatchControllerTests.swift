@@ -21,6 +21,42 @@ struct DispatchControllerTests {
         #expect(controller.state.overallPhase != .preparing, "Dispatch timed out")
     }
 
+    @Test func retryOnlyFailedChannelUsesOriginalSnapshotAndPreventsDoubleClick() async throws {
+        let service = FakeDispatchService()
+        service.statuses[.x] = "failed"
+        let controller = makeController(service)
+        controller.dispatch()
+        try await waitForDispatch(controller)
+        #expect(controller.canRetry(.x))
+        #expect(!controller.canRetry(.zhihu))
+        controller.state.markdown = "edited after submission"
+        service.statuses[.x] = "draftReady"
+        controller.retry(.x)
+        controller.retry(.x)
+        controller.reset()
+        try await waitForDispatch(controller)
+        #expect(service.retries == [.x])
+        #expect(service.platforms == [.zhihu, .jike, .x, .x])
+        #expect(service.requests.last?.body == "Test **body**")
+        #expect(controller.state.overallPhase == .awaitingConfirm)
+        #expect(service.completionCount == 2)
+    }
+
+    @Test func retryPreparationFailureDoesNotRerunAnyChannel() async throws {
+        let service = FakeDispatchService()
+        service.statuses[.x] = "failed"
+        let controller = makeController(service)
+        controller.dispatch()
+        try await waitForDispatch(controller)
+        service.retryFails = true
+        controller.retry(.x)
+        try await waitForDispatch(controller)
+        #expect(service.platforms == [.zhihu, .jike, .x])
+        #expect(controller.state.platformPhase[.zhihu] == .awaitingConfirm)
+        #expect(!controller.canRetry(.x))
+        #expect(service.completionCount == 2)
+    }
+
     @Test(arguments: [
         ("A", "C", ["B", "A", "C"]),
         ("C", "A", ["C", "A", "B"]),
@@ -733,6 +769,12 @@ private final class FakeDispatchService: DispatchServicing {
         while pauseNavigation { try await Task.sleep(for: .milliseconds(1)) }
         if missingPage { throw ChannelNavigationError.pageUnavailable }
         if navigationFailure { throw NSError(domain: "test-navigation", code: 1) }
+    }
+    var retries: [PlatformID] = []
+    var retryFails = false
+    func prepareRetry(_ platform: PlatformID) async throws {
+        retries.append(platform)
+        if retryFails { throw ChannelNavigationError.pageUnavailable }
     }
     var completionCount = 0
     var pauseCompletion = false

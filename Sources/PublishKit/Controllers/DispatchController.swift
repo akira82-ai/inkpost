@@ -165,6 +165,40 @@ public final class DispatchController {
             log("通知工作区 \(workspaceID)：\(error.localizedDescription)")
         }
     }
+    public func canRetry(_ platform: PlatformID) -> Bool {
+        state.taskPlatforms.contains(platform) && state.platformPhase[platform] == .failed
+            && state.platformOutcomes[platform]?.failure?.recovery == .retryAllowed
+    }
+
+    public func retry(_ platform: PlatformID) {
+        guard canRetry(platform), state.hasEnded, !state.isHandingOff, !state.isSettling,
+              draftRequest != nil else { return }
+        state.overallPhase = .preparing
+        state.platformPhase[platform] = .preparing
+        state.currentPlatform = platform
+        state.platformEvents[platform] = nil
+        state.navigationMessage = nil
+        let token = generation
+        runningTask = Task {
+            do {
+                try await service.prepareRetry(platform)
+                try Task.checkCancellation()
+                guard generation == token else { return }
+                try await runOnePlatform(platform, command: .retry)
+            } catch {
+                guard generation == token else { return }
+                if error is CancellationError || Task.isCancelled {
+                    state.platformPhase[platform] = .cancelled
+                } else {
+                    apply(.failed((error as? ChannelFailure) ?? .init(code: .executionFailed, stage: .openingEditor,
+                        detail: error.localizedDescription, recovery: .inspectionRequired)), to: platform)
+                }
+            }
+            guard generation == token else { return }
+            await finishTask()
+        }
+    }
+
     public func resumeWaitingLogins() { resumePlatforms(state.waitingLoginPlatforms) }
 
     public func resume(_ platform: PlatformID) { resumePlatforms([platform]) }

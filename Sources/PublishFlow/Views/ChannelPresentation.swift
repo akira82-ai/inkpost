@@ -57,8 +57,8 @@ enum ChannelStatusPresentation: CaseIterable {
         switch self {
         case .filling: return "arrow.triangle.2.circlepath"
         case .ready: return "checkmark"
-        case .login: return "rectangle.portrait.and.arrow.right"
-        case .problem: return "exclamationmark.diamond"
+        case .login: return "arrow.up.forward.square"
+        case .problem: return "arrow.up.forward.square"
         }
     }
     var canOpen: Bool { self == .login || self == .problem }

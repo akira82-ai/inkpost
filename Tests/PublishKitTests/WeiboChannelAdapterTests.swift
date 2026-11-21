@@ -21,7 +21,7 @@ struct WeiboChannelAdapterTests {
         try adapter.validate(.init(title: "", body: String(repeating: "中", count: 2001)))
     }
 
-    @Test(arguments: ["valid", "login", "conflict", "rejected", "cancel", "unknownBody", "closedPanel"])
+    @Test(arguments: ["retry", "retryLogin", "resetFailed", "valid", "login", "conflict", "rejected", "cancel", "unknownBody", "closedPanel"])
     func realAdapterUsesNativePasteAndChecksResult(_ mode: String) async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -36,13 +36,14 @@ struct WeiboChannelAdapterTests {
         script=sys.stdin.read()
         with (root/'log').open('a') as f:f.write(script+'\\n')
         path=root/'state'
-        state=json.loads(path.read_text()) if path.exists() else {'body':'','opens':0}
         mode=\(String(reflecting: mode))
+        state=json.loads(path.read_text()) if path.exists() else {'body':'old draft' if mode in ['retry','retryLogin','resetFailed'] else '','opens':0}
         result={'ok':True}
         if 'weibo:open-editor' in script:
             state['opens']+=1
-            result['loginRequired']=mode=='login' and state['opens']==1
+            result['loginRequired']=mode in ['login','retryLogin'] and state['opens']==1
         if 'weibo:check-quick-publish' in script:result['present']=not(mode=='closedPanel' and state['opens']>1)
+        if 'retry:clear-editor' in script and mode!='resetFailed':state['body']=''
         if 'weibo:paste-body' in script:
             if mode=='unknownBody':result={'ok':False,'error':'paste result unknown'}
             else:state['body']=\(String(reflecting: expected))
@@ -64,6 +65,12 @@ struct WeiboChannelAdapterTests {
             do { _ = try await task.value; Issue.record("Cancellation swallowed") } catch { #expect(error is CancellationError) }
             return
         }
+        if mode == "resetFailed" {
+            do { _ = try await execute(.retry); Issue.record("Pasted before clearing") }
+            catch { #expect((error as? ChannelFailure)?.recovery == .inspectionRequired) }
+            #expect(!(try String(contentsOf: log)).contains("weibo:paste-body"))
+            return
+        }
         if mode == "unknownBody" {
             for command in [ChannelCommand.prepare, .resumeAfterUser] {
                 do { _ = try await execute(command); Issue.record("Uncertain body write accepted") }
@@ -83,8 +90,8 @@ struct WeiboChannelAdapterTests {
             #expect(!(try String(contentsOf: log)).contains("weibo:paste-body"))
             #expect(!(try String(contentsOf: log)).contains("weibo:paste-image"))
         } else {
-            var outcome = try await execute(.prepare)
-            if mode == "login" { #expect(outcome.failure?.code == .loginRequired); outcome = try await execute(.resumeAfterUser) }
+            var outcome = try await execute(mode.hasPrefix("retry") ? .retry : .prepare)
+            if ["login", "retryLogin"].contains(mode) { #expect(outcome.failure?.code == .loginRequired); outcome = try await execute(.resumeAfterUser) }
             #expect(outcome.failure == nil)
             if mode == "closedPanel" {
                 do { _ = try await execute(.resumeAfterUser); Issue.record("Closed composer accepted") }
@@ -94,6 +101,7 @@ struct WeiboChannelAdapterTests {
                 }
             } else { _ = try await execute(.resumeAfterUser) }
             let scripts = try String(contentsOf: log)
+            if mode.hasPrefix("retry") { #expect(scripts.components(separatedBy: "retry:clear-editor").count - 1 == 1) }
             #expect(scripts.components(separatedBy: "weibo:paste-body").count - 1 == 1)
             #expect(scripts.components(separatedBy: "weibo:open-quick-publish").count - 1 == 1)
             #expect(scripts.contains(".woo-modal-main .wbpro-layer textarea"))

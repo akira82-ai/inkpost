@@ -6,6 +6,7 @@ final class WeiboChannelAdapter: ChannelAdapter {
     // No verified account-independent ceiling; actual page acceptance is checked below.
     let capabilities = ChannelCapabilities(usesTitle: true, maximumImages: .max,
         entryURL: "https://weibo.com/", requiresTitle: false)
+    private var retryResetNeeded = false
     private var confirmedImages: [String] = []
     private var pendingImage = false
     private var bodyPasteAttempted = false
@@ -32,6 +33,7 @@ final class WeiboChannelAdapter: ChannelAdapter {
 
     @MainActor
     private func prepare(request: ChannelRequest, context: ChannelExecutionContext) async throws -> ChannelOutcome {
+        if context.command == .retry { retryResetNeeded = true }
         try context.advance(.validatingRequest)
         try validate(request)
         let uploadPaths = try context.uploadPaths(for: request)
@@ -93,7 +95,18 @@ final class WeiboChannelAdapter: ChannelAdapter {
         }
         let expected = expectedBody(for: request)
         try context.advance(.fillingContent)
-        let initial = try await read(context.bridge)
+        var initial = try await read(context.bridge)
+        if retryResetNeeded {
+            try context.advance(.fillingContent)
+            try await RetryEditorReset.clear(context.bridge, editor: Self.editor,
+                attachments: ".woo-modal-main .wbpro-layer div[class^=\"_picbed_\"]:not(:has(input[type=\"file\"]))", count: initial.images.count)
+            initial = try await read(context.bridge)
+            guard initial.body.isEmpty, initial.images.isEmpty else {
+                throw ChannelFailure(code: .verificationFailed, stage: .fillingContent,
+                    detail: "重试页面未清空，已停止填写", recovery: .inspectionRequired)
+            }
+            retryResetNeeded = false
+        }
         try check(initial, expected: expected, allowEmpty: true, stage: .fillingContent)
         try validateImages(initial.images)
         if initial.body.isEmpty {

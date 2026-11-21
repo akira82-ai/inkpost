@@ -24,7 +24,7 @@ struct XChannelAdapterTests {
         try adapter.validate(.init(title: "", body: String(repeating: "🖋️", count: 1899)))
     }
 
-    @Test(arguments: ["valid", "login", "conflict", "rejected", "cancel"])
+    @Test(arguments: ["retry", "retryLogin", "resetFailed", "valid", "login", "conflict", "rejected", "cancel"])
     func realAdapterUsesNativePasteAndChecksResult(_ mode: String) async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -39,12 +39,13 @@ struct XChannelAdapterTests {
         script=sys.stdin.read()
         with (root/'log').open('a') as f:f.write(script+'\\n')
         path=root/'state'
-        state=json.loads(path.read_text()) if path.exists() else {'body':'','opens':0}
         mode=\(String(reflecting: mode))
+        state=json.loads(path.read_text()) if path.exists() else {'body':'old draft' if mode in ['retry','retryLogin','resetFailed'] else '','opens':0}
         result={'ok':True}
         if 'x:open-editor' in script:
             state['opens']+=1
-            result['loginRequired']=mode=='login' and state['opens']==1
+            result['loginRequired']=mode in ['login','retryLogin'] and state['opens']==1
+        if 'retry:clear-editor' in script and mode!='resetFailed':state['body']=''
         if 'x:paste-body' in script:state['body']=\(String(reflecting: expected))
         if 'x:read-page' in script:result['value']={'body':'other' if mode=='conflict' else state['body'],'images':[],'busy':False,'rejected':mode=='rejected','accepted':True}
         path.write_text(json.dumps(state))
@@ -64,17 +65,24 @@ struct XChannelAdapterTests {
             do { _ = try await task.value; Issue.record("Cancellation swallowed") } catch { #expect(error is CancellationError) }
             return
         }
+        if mode == "resetFailed" {
+            do { _ = try await execute(.retry); Issue.record("Pasted before clearing") }
+            catch { #expect((error as? ChannelFailure)?.recovery == .inspectionRequired) }
+            #expect(!(try String(contentsOf: log)).contains("x:paste-body"))
+            return
+        }
         if ["conflict", "rejected"].contains(mode) {
             do { _ = try await execute(.prepare); Issue.record("Invalid content accepted") } catch { #expect(error is ChannelFailure) }
             #expect(!(try String(contentsOf: log)).contains("x:paste-body"))
         } else {
-            var outcome = try await execute(.prepare)
-            if mode == "login" { #expect(outcome.failure?.code == .loginRequired); outcome = try await execute(.resumeAfterUser) }
+            var outcome = try await execute(mode.hasPrefix("retry") ? .retry : .prepare)
+            if ["login", "retryLogin"].contains(mode) { #expect(outcome.failure?.code == .loginRequired); outcome = try await execute(.resumeAfterUser) }
             #expect(outcome.failure == nil)
             _ = try await execute(.resumeAfterUser)
             let scripts = try String(contentsOf: log)
+            if mode.hasPrefix("retry") { #expect(scripts.components(separatedBy: "retry:clear-editor").count - 1 == 1) }
             #expect(scripts.components(separatedBy: "x:paste-body").count - 1 == 1)
-            #expect(!scripts.contains("await page.click"))
+            if !mode.hasPrefix("retry") { #expect(!scripts.contains("await page.click")) }
         }
     }
 

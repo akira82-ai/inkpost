@@ -6,13 +6,13 @@ import PublishKit
 
 @MainActor
 struct DispatchResultViewTests {
-    @Test func fourStatusIconsHaveDistinctAccessibleMeaning() {
+    @Test func resultIconsShareManualActionForLoginAndFailure() {
         #expect(ChannelStatusPresentation(phase: .preparing) == .filling)
         #expect(ChannelStatusPresentation(phase: .awaitingConfirm) == .ready)
         #expect(ChannelStatusPresentation(phase: .needLogin) == .login)
         #expect(ChannelStatusPresentation(phase: .failed) == .problem)
         #expect(ChannelStatusPresentation(phase: .cancelled) == .problem)
-        #expect(Set(ChannelStatusPresentation.allCases.map(\.symbol)).count == 4)
+        #expect(Set(ChannelStatusPresentation.allCases.map(\.symbol)).count == 3)
         #expect(ChannelStatusPresentation.login.canOpen)
         #expect(!ChannelStatusPresentation.ready.canOpen)
     }

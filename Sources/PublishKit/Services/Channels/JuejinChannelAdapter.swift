@@ -6,6 +6,7 @@ final class JuejinChannelAdapter: ChannelAdapter {
     let capabilities = ChannelCapabilities(usesTitle: true, maximumImages: .max,
         entryURL: "https://juejin.cn/pins", maximumBodyCharacters: 1000)
     private static let editor = ".pin-editor .rich-editor[contenteditable=\"true\"]"
+    private var retryResetRequired = false
     private var opened = false
     private var bodyAttempted = false
     private var confirmed: [String] = []
@@ -36,6 +37,7 @@ final class JuejinChannelAdapter: ChannelAdapter {
 
     @MainActor
     private func prepare(request: ChannelRequest, context: ChannelExecutionContext) async throws -> ChannelOutcome {
+        if context.command == .retry { retryResetRequired = true }
         try context.advance(.validatingRequest)
         try validate(request)
         let paths = try context.uploadPaths(for: request)
@@ -78,9 +80,22 @@ final class JuejinChannelAdapter: ChannelAdapter {
                 }
                 await page.click('\(Self.editor)', {label:'替换沸点原有正文'});
                 await page.keyboard.press('Meta+A');
-                await page.keyboard.insertText(\(context.bridge.jsStr(expectedBody(for: request))));
+                \(retryResetRequired ? "await page.keyboard.press('Backspace');" : "await page.keyboard.insertText(\(context.bridge.jsStr(expectedBody(for: request))));")
                 cliLog(JSON.stringify({ok:true}));
                 """)
+            if retryResetRequired {
+                let empty = try await read(context.bridge)
+                guard empty.body.isEmpty, empty.images.isEmpty, empty.linkCount == 0 else {
+                    throw failure("重试页面未清空，已停止填写")
+                }
+                _ = try await context.bridge.run("""
+                    // juejin:paste-body
+                    await page.focus('\(Self.editor)');
+                    await page.keyboard.insertText(\(context.bridge.jsStr(expectedBody(for: request))));
+                    cliLog(JSON.stringify({ok:true}));
+                    """)
+                retryResetRequired = false
+            }
         }
         try check(try await read(context.bridge), request: request)
         try context.advance(.uploadingAssets)

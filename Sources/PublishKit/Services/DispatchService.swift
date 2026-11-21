@@ -10,6 +10,7 @@ public protocol DispatchServicing {
     func handOff() async throws
     func completeTask() async throws
     func resumeControl() async throws
+    func prepareRetry(_ platform: PlatformID) async throws
     func openWorkspace(id: Int) async throws
     func openChannel(_ platform: PlatformID) async throws
 }
@@ -19,6 +20,10 @@ public enum ChannelNavigationError: Error, Equatable {
 }
 
 public extension DispatchServicing {
+    func prepareRetry(_ platform: PlatformID) async throws {
+        throw EgoBridge.BridgeError.toolFailed("此服务不支持重新填写")
+    }
+
     func completeTask() async throws { try await handOff() }
 
     func openChannel(_ platform: PlatformID) async throws {
@@ -42,7 +47,8 @@ public final class DispatchService: DispatchServicing {
     private var spaceID: Int?
     private var handedOff = false
     private var completed = false
-    private var completedPageURLs: [String: String] = [:]
+    private var completedPageURLs: [PlatformID: String] = [:]
+    private var managedPlatforms: Set<PlatformID> = []
     private var registry: ChannelRegistry
     private let makeRegistry: () -> ChannelRegistry
     private var bridgeFactory: ((PlatformID) async throws -> EgoBridge)?
@@ -58,7 +64,7 @@ public final class DispatchService: DispatchServicing {
         assetPreparation?.cancel()
         assetPreparation = nil; taskRequest = nil
         taskID = id; sessions = [:]
-        bridges = [:]; spaceID = nil; handedOff = false; completed = false; completedPageURLs = [:]
+        bridges = [:]; spaceID = nil; handedOff = false; completed = false; completedPageURLs = [:]; managedPlatforms = []
         registry = makeRegistry()
         if bridgeFactory == nil {
             let window = try await EgoWorkspaceNavigator.currentWindow()
@@ -86,7 +92,7 @@ public final class DispatchService: DispatchServicing {
         if (info.ownership === "user") {
             cliLog(JSON.stringify({ok:true, urls:{}}));
         } else {
-            const task = await \(handedOff ? "takeOverTaskSpace" : "taskSpace")(\(id));
+            const task = await (info.ownership === "agentDelegatedToUser" ? takeOverTaskSpace : taskSpace)(\(id));
             const tabs = await task.tabs();
             const urls = Object.fromEntries(tabs.filter(tab => tab.label).map(tab => [tab.label, tab.url]));
             await task.finish({keep:"all"});
@@ -94,7 +100,11 @@ public final class DispatchService: DispatchServicing {
         }
         """)
         guard result.bool("ok") == true else { throw EgoBridge.BridgeError.noResult(result.rawOutput) }
-        completedPageURLs = result.json?["urls"] as? [String: String] ?? [:]
+        let urls = result.json?["urls"] as? [String: String] ?? [:]
+        for platform in managedPlatforms {
+            if let label = bridges[platform]?.pageLabel, let url = urls[label] { completedPageURLs[platform] = url }
+        }
+        managedPlatforms = []
         completed = true
         handedOff = true
     }
@@ -113,7 +123,7 @@ public final class DispatchService: DispatchServicing {
         guard activeAttempts.isEmpty else { throw EgoBridge.BridgeError.toolFailed("此工作区仍在填写中，请完成后再打开") }
         guard let id = spaceID, let bridge = bridges[platform] else { throw ChannelNavigationError.pageUnavailable }
         let identity = String(data: try JSONSerialization.data(withJSONObject: ["label": bridge.pageLabel,
-            "url": completedPageURLs[bridge.pageLabel] ?? ""]), encoding: .utf8)!
+            "url": completedPageURLs[platform] ?? ""]), encoding: .utf8)!
         let result = try await EgoLiteEngine().runRaw(script: """
         const info = (await listTaskSpaces()).find(space => space.id === \(id));
         if (!info) throw new Error("本次任务工作区已不存在");
@@ -149,6 +159,66 @@ public final class DispatchService: DispatchServicing {
         try await EgoWorkspaceNavigator.activate()
     }
 
+    /// Replace only the failed channel Page; never reuse an adapter's old upload checkpoints.
+    public func prepareRetry(_ platform: PlatformID) async throws {
+        guard activeAttempts.isEmpty, sessions[platform]?.outcome.failure?.recovery == .retryAllowed,
+              let id = spaceID else { throw EgoBridge.BridgeError.toolFailed("此渠道当前不能重试") }
+        let label = bridges[platform]?.pageLabel ?? ""
+        let script = try Self.retryPageScript(spaceID: id, label: label,
+            url: completedPageURLs[platform] ?? "", completed: completed)
+        // Even cancellation during the browser command must settle any acquired control.
+        completed = false; handedOff = false
+        let result = try await EgoLiteEngine().runRaw(script: script)
+        if result.bool("closed") == true {
+            bridges[platform] = nil
+            completedPageURLs[platform] = nil
+        }
+        if let error = result.string("error") {
+            completed = true; handedOff = true
+            throw ChannelFailure(code: .executionFailed, stage: .openingEditor, detail: error,
+                recovery: result.bool("closed") == true ? .retryAllowed : .inspectionRequired)
+        }
+        guard result.bool("ok") == true, let newLabel = result.string("label") else {
+            throw EgoBridge.BridgeError.noResult(result.rawOutput)
+        }
+        bridges[platform] = try EgoBridge(spaceName: "", engine: EgoLiteEngine(), pageLabel: newLabel, spaceID: id)
+        registry.replace(platform, with: makeRegistry())
+        sessions[platform] = nil
+        completedPageURLs[platform] = nil
+        managedPlatforms = [platform]
+        completed = false; handedOff = false
+    }
+
+    static func retryPageScript(spaceID id: Int, label: String, url: String, completed: Bool) throws -> String {
+        let identity = String(data: try JSONSerialization.data(withJSONObject: ["label": label, "url": url]), encoding: .utf8)!
+        return """
+        const info = (await listTaskSpaces()).find(space => space.id === \(id));
+        if (!info) throw new Error("原工作区已不存在");
+        const task = await (info.ownership === "user" ? claimTaskSpace : info.ownership === "agentDelegatedToUser" ? takeOverTaskSpace : taskSpace)(\(id));
+        let closed = false;
+        try {
+            const identity = \(identity);
+            const tabs = await task.tabs();
+            if (identity.label) {
+                const matches = tabs.filter(tab => \(completed ? "identity.url && tab.url === identity.url" : "tab.label === identity.label"));
+                if (matches.length !== 1) throw new Error("无法唯一确认旧渠道页面，请手工处理");
+                const old = matches[0];
+                if (old.openedBy !== "agent") throw new Error("旧页面归属无法确认，请手工处理");
+                const page = old.label ? task.page(old.label) : await task.adopt(old.page);
+                await page.close();
+                if ((await task.tabs()).some(tab => tab.targetId === old.targetId)) throw new Error("旧页面未关闭");
+            }
+            closed = true;
+            // A close failure throws before any new Page is created.
+            const page = await task.newPage();
+            cliLog(JSON.stringify({ok:true, label:page.label}));
+        } catch (error) {
+            await task.finish({keep:"all"});
+            cliLog(JSON.stringify({ok:false, closed, error:String(error)}));
+        }
+        """
+    }
+
     public func resumeControl() async throws {
         guard !completed else { throw EgoBridge.BridgeError.toolFailed("此任务已经结束，不能继续填写") }
         guard handedOff, let id = spaceID else { return }
@@ -178,6 +248,7 @@ public final class DispatchService: DispatchServicing {
             guard let label = result.string("label") else { throw EgoBridge.BridgeError.noResult(result.rawOutput) }
             bridge = try EgoBridge(spaceName: "", engine: engine, pageLabel: label, spaceID: id)
             bridges[platform] = bridge
+            managedPlatforms.insert(platform)
         }
         return bridge
     }
@@ -193,7 +264,7 @@ public final class DispatchService: DispatchServicing {
             return .failed(.init(code: .invalidCommand, stage: .validatingRequest, detail: "任务输入快照已改变", recovery: .notRecoverable))
         }
         let previous = sessions[platform]
-        guard command == .prepare ? previous == nil : (previous?.request == request && previous?.outcome.canResume == true) else {
+        guard command != .resumeAfterUser ? previous == nil : (previous?.request == request && previous?.outcome.canResume == true) else {
             return .failed(.init(code: .invalidCommand, stage: .validatingRequest, detail: "无法以当前内容重复开始或恢复此渠道", recovery: .notRecoverable))
         }
         activeAttempts[platform] = execution.attemptID

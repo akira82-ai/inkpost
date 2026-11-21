@@ -252,3 +252,14 @@ swift test --no-parallel \
 - 后台唤回修复（2026-11-17）：窗口 `visible=true, focused=false` 时旧判断跳过动画。现后台、非 key 或非当前桌面唤回均重新对齐菜单栏并播放；已在前台不重播，前台快捷键仍收起。README 和产品需求同步。窗口／快捷键／动效 21 tests / 3 suites 通过（4.960 秒），覆盖遮挡后快捷键启动动画、稿件保留与普通层级。正式签名构建及替换启动通过，旧包 `.build/inkpost-previous.Vuuzjx/Inkpost-Compact.app`；原生 UI 确认窗口及正文焦点正常。未现场等待长时间或跨桌面复测。日志 `/tmp/inkpost53-covered-tests.log`、`/tmp/inkpost53-covered-build.log`。未提交／推送。
 
 - 0.21.2 delivery checks: 144 tests / 26 suites passed serially (187.359s). Release build, formal code signature, DMG integrity, extracted ZIP signature, version, SHA256 and signed appcast checks passed. Cross-Space and long-running background scenarios were not revalidated live.
+
+## 单渠道重试（#65）
+
+- `DispatchController.retry` 只接受失败且恢复类型为 `retryAllowed` 的渠道，串行锁定执行，沿用 `draftRequest`，通过公共 `finishTask` 收尾。已完成、需登录、需检查、不可恢复及取消状态不直接触发重新填写。
+- `DispatchService.prepareRetry` 在原 Space 重新取得控制，关闭可唯一识别且归属 Agent 的旧页后创建新页；完成后失效的页面标签通过按渠道保存的 URL 唯一匹配，不持久使用 CDP targetId。同 URL 多页、用户改了 URL 或页面归属不明时停止，不猜测关闭。
+- 仅替换目标适配器、页面与会话，保留其他渠道结果和公共 PNG 素材；新的 `retry` 命令从头执行，先清空新页面恢复的旧稿并确认清空成功。清空步骤的状态跨登录恢复保留，正文写入结果不确定时不重复清空。关闭成功而新建失败以明确结果允许下次重试；浏览器命令结果未知时交给人工处理。
+- 页面脚本边界通过 Node 模拟和 ego 隔离 Space 验证，不以此替代各真实平台的回归验收。
+
+- 知乎、即刻、X、微博复用 `RetryEditorReset`：原生键盘清空正文、原生字段操作清空标题，附件根据已知区域内当前可唯一识别的删除/移除语义控件执行原生点击，并等待数量下降。未知控件或清空结果不符即停止，不猜测点击、不直接修改 DOM。掘金/B站复用已有确定性移除步骤；掘金重试将清空与插入拆开，中间回读验证。页面脚本单元测试需要 PATH 中可用的 Node.js（与 ego 浏览器运行时相同的脚本语言）。
+
+- 0.22.0 交付验证（2026-11-21）：全量串行回归 147 tests / 27 suites 通过（225.881 秒，`/tmp/inkpost-0220-tests.log`）；正式签名 release 构建、strict/deep 验签、DMG 完整性、ZIP 解压验签、版本、SHA256、签名 appcast、脚本语法及差异检查通过。本次仅打包，不安装、替换或启动本机应用；各真实网站重试、附件删除兼容性及正式应用完整交接仍待现场验收，#65 保持开启。

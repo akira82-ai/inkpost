@@ -35,12 +35,15 @@ public protocol ChannelAdapter: AnyObject {
 
 /// A registry is scoped to a task: adapter instances retain only that task's recovery state.
 public struct ChannelRegistry {
-    private let adapters: [PlatformID: any ChannelAdapter]
+    private var adapters: [PlatformID: any ChannelAdapter]
     public init(_ adapters: [any ChannelAdapter]) {
         precondition(Set(adapters.map(\.platform)).count == adapters.count, "Duplicate channel adapter")
         self.adapters = Dictionary(uniqueKeysWithValues: adapters.map { ($0.platform, $0) })
     }
     public func adapter(for platform: PlatformID) -> (any ChannelAdapter)? { adapters[platform] }
+    mutating func replace(_ platform: PlatformID, with fresh: ChannelRegistry) {
+        adapters[platform] = fresh.adapter(for: platform)
+    }
     public static var standard: ChannelRegistry {
         .init([ZhihuChannelAdapter(), JikeChannelAdapter(), XChannelAdapter(), WeiboChannelAdapter(), JuejinChannelAdapter(), BilibiliChannelAdapter(), FixtureChannelAdapter()])
     }

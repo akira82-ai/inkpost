@@ -35,7 +35,7 @@ public enum ChannelOutcome: Equatable, Sendable {
         return [.retryAllowed, .loginRequired, .inspectionRequired].contains(recovery)
     }
 }
-public enum ChannelCommand: String, Sendable { case prepare, resumeAfterUser }
+public enum ChannelCommand: String, Sendable { case prepare, retry, resumeAfterUser }
 public struct ChannelExecutionID: Hashable, Sendable {
     public let taskID: UUID
     public let platform: PlatformID

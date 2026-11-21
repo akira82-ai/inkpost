@@ -20,7 +20,7 @@ struct JuejinChannelAdapterTests {
         #expect(throws: ChannelFailure.self) { try adapter.validate(.init(title: "题", body: " \n")) }
     }
 
-    @Test(arguments: ["valid", "login", "changedBody", "unknownBody", "unknownImage", "timeout", "reordered", "deleted", "replaced", "linkAdded", "rejected", "blocked", "cancel", "cancelDuring"])
+    @Test(arguments: ["retryClearFailed", "retryLoginDraft", "retryDraft", "valid", "login", "changedBody", "unknownBody", "unknownImage", "timeout", "reordered", "deleted", "replaced", "linkAdded", "rejected", "blocked", "cancel", "cancelDuring"])
     func realAdapterClearsOnceAndPreservesRecovery(_ mode: String) async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -42,12 +42,13 @@ struct JuejinChannelAdapterTests {
         result={'ok':True}
         if 'juejin:open-editor' in script:
             state['opens']+=1
-            result['loginRequired']=mode=='login' and state['opens']==1
-        if 'juejin:replace-body' in script:
-            assert 'Meta+A' in script and 'keyboard.insertText' in script and '.preview-image .delete' in script
+            result['loginRequired']=mode in ['login','retryLoginDraft'] and state['opens']==1
+        if 'juejin:replace-body' in script and mode!='retryClearFailed':
+            assert 'Meta+A' in script and ('keyboard.insertText' in script or 'Backspace' in script) and '.preview-image .delete' in script
             state['images']=[]; state['links']=0
-            state['body']='' if mode=='unknownBody' else \(String(reflecting: expected))
+            state['body']='' if mode=='unknownBody' or 'Backspace' in script else \(String(reflecting: expected))
             if mode=='unknownBody':result={'ok':False,'error':'unknown paste'}
+        if 'juejin:paste-body' in script:state['body']=\(String(reflecting: expected))
         if 'juejin:add-image' in script:
             upload=pathlib.Path(json.loads(script.split("input#photo[type=file]', ",1)[1].split(');',1)[0]))
             assert upload.suffix=='.png' and upload.read_bytes().startswith(bytes([137,80,78,71,13,10,26,10]))
@@ -88,6 +89,25 @@ struct JuejinChannelAdapterTests {
                 let log = try String(contentsOf: directory.appendingPathComponent("log"))
                 #expect(log.components(separatedBy: "juejin:add-image").count - 1 == 1)
             }
+            return
+        }
+        if mode == "retryClearFailed" {
+            do { _ = try await execute(.retry); Issue.record("Pasted after failed clearing") }
+            catch { #expect((error as? ChannelFailure)?.recovery == .inspectionRequired) }
+            let scripts = try String(contentsOf: directory.appendingPathComponent("log"))
+            #expect(!scripts.contains("juejin:paste-body"))
+            #expect(!scripts.contains("juejin:add-image"))
+            return
+        }
+        if ["retryDraft", "retryLoginDraft"].contains(mode) {
+            var outcome = try await execute(.retry)
+            if mode == "retryLoginDraft" {
+                #expect(outcome.failure?.recovery == .loginRequired)
+                outcome = try await execute(.resumeAfterUser)
+            }
+            #expect(outcome.failure == nil)
+            let scripts = try String(contentsOf: directory.appendingPathComponent("log"))
+            #expect(scripts.components(separatedBy: "juejin:replace-body").count - 1 == 1)
             return
         }
         if ["unknownBody", "unknownImage", "timeout", "rejected"].contains(mode) {

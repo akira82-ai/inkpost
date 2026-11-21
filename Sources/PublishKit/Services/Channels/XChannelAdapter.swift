@@ -5,6 +5,7 @@ final class XChannelAdapter: ChannelAdapter {
     let platform: PlatformID = .x
     let capabilities = ChannelCapabilities(usesTitle: false, maximumImages: 4,
         entryURL: "https://x.com/compose/post", requiresTitle: false, maximumBodyCharacters: 1899)
+    private var retryResetNeeded = false
     private var confirmedImages: [String] = []
     private var pendingImage = false
     private static let editor = "[role=\"dialog\"] [data-testid=\"tweetTextarea_0\"][contenteditable=\"true\"]"
@@ -23,6 +24,7 @@ final class XChannelAdapter: ChannelAdapter {
 
     @MainActor
     func execute(request: ChannelRequest, context: ChannelExecutionContext) async throws -> ChannelOutcome {
+        if context.command == .retry { retryResetNeeded = true }
         try context.advance(.validatingRequest)
         try validate(request)
         let uploadPaths = try context.uploadPaths(for: request)
@@ -43,7 +45,18 @@ final class XChannelAdapter: ChannelAdapter {
                 detail: "请登录 X 后继续此渠道", recovery: .loginRequired))
         }
         let expected = expectedBody(for: request)
-        let initial = try await read(context.bridge)
+        var initial = try await read(context.bridge)
+        if retryResetNeeded {
+            try context.advance(.fillingContent)
+            try await RetryEditorReset.clear(context.bridge, editor: Self.editor,
+                attachments: "[role=\"dialog\"] [data-testid=\"attachments\"] img", count: initial.images.count)
+            initial = try await read(context.bridge)
+            guard initial.body.isEmpty, initial.images.isEmpty else {
+                throw ChannelFailure(code: .verificationFailed, stage: .fillingContent,
+                    detail: "重试页面未清空，已停止填写", recovery: .inspectionRequired)
+            }
+            retryResetNeeded = false
+        }
         try check(initial, expected: expected, allowEmpty: true)
         try validateImages(initial.images)
         try context.advance(.fillingContent)

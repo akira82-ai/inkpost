@@ -33,3 +33,5 @@ Read this document before changing `ZhihuChannelAdapter.swift`. Common architect
 ## Temporary clipboard writes (#55)
 
 Text paste uses `ClipboardPasteService.withTextPaste(text)` to write plain text and `org.nspasteboard.TransientType` in one pasteboard item, followed by native `Meta+V`. Do not call `keyboard.paste(text)` here: that would rewrite the marked clipboard. PNG clipboard uploads share the same marker and lease. Restore only while the app owns the pasteboard change count; never overwrite a newer user copy. This remains native paste, not direct DOM editing. Channel-specific live compatibility after this change still requires verification.
+
+- #65：单渠道重试使用新页面及新适配器状态。定位编辑器后先清空旧标题（若支持）、正文及附件，确认清空成功后再填写原任务稿件；清空失败停止，不追加。登录后继续仍执行尚未完成的清空步骤。此路径的真实网站附件删除控件兼容性需实测，不能用本地替身通过代替真实验收。

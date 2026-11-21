@@ -23,7 +23,7 @@ struct BilibiliChannelAdapterTests {
         }
     }
 
-    @Test(arguments: ["valid", "login", "oldDraft", "clearFailed", "changedBody", "changedTitle", "unknownTitle", "unknownBody", "unknownImage", "timeout", "reordered", "deleted", "replaced", "rejected", "blocked", "cancel", "cancelDuring"])
+    @Test(arguments: ["retryLoginDraft", "retryDraft", "valid", "login", "oldDraft", "clearFailed", "changedBody", "changedTitle", "unknownTitle", "unknownBody", "unknownImage", "timeout", "reordered", "deleted", "replaced", "rejected", "blocked", "cancel", "cancelDuring"])
     func actualAdapterPreservesPageAndDoesNotReplayWrites(_ mode: String) async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -39,11 +39,11 @@ struct BilibiliChannelAdapterTests {
         with (root/'log').open('a') as f:f.write(script+'\\n')
         path=root/'state'
         mode=\(String(reflecting: mode))
-        state=json.loads(path.read_text()) if path.exists() else {'title':'old title' if mode in ['oldDraft','clearFailed'] else '','body':'user draft' if mode in ['oldDraft','clearFailed'] else '','images':[{'identity':'old','ready':True}] if mode=='oldDraft' else [],'opens':0,'uploads':0,'mutate':False}
+        state=json.loads(path.read_text()) if path.exists() else {'title':'old title' if mode in ['retryLoginDraft','retryDraft','oldDraft','clearFailed'] else '','body':'user draft' if mode in ['retryLoginDraft','retryDraft','oldDraft','clearFailed'] else '','images':[{'identity':'old','ready':True}] if mode=='oldDraft' else [],'opens':0,'uploads':0,'mutate':False}
         result={'ok':True}
         if 'bilibili:open-editor' in script:
             state['opens']+=1
-            result['loginRequired']=mode=='login' and state['opens']==1
+            result['loginRequired']=mode in ['login','retryLoginDraft'] and state['opens']==1
         if 'bilibili:clear-draft' in script:
             if mode!='clearFailed':state.update(title='',body='',images=[])
         if 'bilibili:paste-title' in script:
@@ -94,6 +94,17 @@ struct BilibiliChannelAdapterTests {
                 let log = try String(contentsOf: directory.appendingPathComponent("log"))
                 #expect(log.components(separatedBy: "bilibili:add-image").count - 1 == 1)
             }
+            return
+        }
+        if ["retryDraft", "retryLoginDraft"].contains(mode) {
+            var outcome = try await execute(.retry)
+            if mode == "retryLoginDraft" {
+                #expect(outcome.failure?.recovery == .loginRequired)
+                outcome = try await execute(.resumeAfterUser)
+            }
+            #expect(outcome.failure == nil)
+            let scripts = try String(contentsOf: directory.appendingPathComponent("log"))
+            #expect(scripts.components(separatedBy: "bilibili:clear-draft").count - 1 == 1)
             return
         }
         if ["clearFailed", "unknownTitle", "unknownBody", "unknownImage", "timeout", "rejected"].contains(mode) {

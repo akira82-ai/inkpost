@@ -370,7 +370,15 @@ struct ChannelGrid: View {
     }
 
     @ViewBuilder private func statusIcon(_ status: ChannelStatusPresentation, platform: PlatformID) -> some View {
-        if status.canOpen {
+        if controller.canRetry(platform) {
+            Button { controller.retry(platform) } label: {
+                Image(systemName: "arrow.clockwise").font(.system(size: 12, weight: .medium))
+                    .frame(width: 24, height: 26).contentShape(Rectangle())
+            }.buttonStyle(.plain)
+                .disabled(model.overallPhase == .preparing || model.isHandingOff || model.isSettling)
+                .help("重试\(platform.title)：关闭旧页面，使用上次稿件重新填写")
+                .accessibilityLabel("重试\(platform.title)")
+        } else if status.canOpen {
             Button { controller.openChannel(platform) } label: {
                 Image(systemName: status.symbol).font(.system(size: 12, weight: .medium))
                     .frame(width: 24, height: 26).contentShape(Rectangle())

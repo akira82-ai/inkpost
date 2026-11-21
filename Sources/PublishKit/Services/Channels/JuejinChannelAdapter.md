@@ -27,3 +27,7 @@
 - Opt-in live test: `INKPOST_JUEJIN_LIVE=1`, `INKPOST_JUEJIN_SPACE` = this agent-owned TaskSpace name, Page p1. Generate `/tmp/inkpost-juejin-probe-1.png` and `-2.png` first; run `--filter livePinsWithoutPublishing`. It checks no-title/edge whitespace/Tab/emoji cases, then clears current body/attachments and verifies prepare followed by unchanged resume, stopping before Publish. Only use a page authorized for replacement.
 - Live verified: raw text edge cases, two staged PNGs in order, and unchanged resume without duplicate writes, via the real Swift adapter.
 - No final-publication acceptance is claimed. Actual logout, expired login, phone binding, platform errors, maximum image acceptance and network faults remain live fault-injection cases. Existing link cards are removed on initial replacement via the verified `.preview-link .close`; a card added during recovery requires inspection and is never silently included. Creation of new link cards is outside this adapter.
+
+
+
+- #65：单渠道重试使用新页面及新适配器状态。定位编辑器后先清空旧标题（若支持）、正文及附件，确认清空成功后再填写原任务稿件；清空失败停止，不追加。登录后继续仍执行尚未完成的清空步骤。此路径的真实网站附件删除控件兼容性需实测，不能用本地替身通过代替真实验收。

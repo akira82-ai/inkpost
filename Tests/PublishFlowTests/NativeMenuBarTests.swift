@@ -204,8 +204,9 @@ struct NativeMenuBarTests {
         #expect(!bar.mainWindow.isMiniaturized)
         bar.showMainWindow()
         let controls = try #require(bar.mainWindow.titlebarAccessoryViewControllers.first?.view as? UpdateTitlebarControls)
-        let gear = controls.gear
-        gear.performClick(nil)
+        #expect(controls.subviews.count == 1)
+        #expect(bar.contextMenu.items.map(\.title) == ["打开墨驿", "设置…", "检查更新…", "", "关于墨驿", "退出墨驿"])
+        bar.contextMenu.performActionForItem(at: 1)
         #expect(settingsOpens == 1)
         #expect(bar.mainWindow.isVisible)
         #expect(controller.state.markdown == "Original text\n\n retained")

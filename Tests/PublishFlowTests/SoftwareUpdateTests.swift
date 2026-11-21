@@ -7,7 +7,7 @@ import Sparkle
 
 @MainActor
 struct SoftwareUpdateTests {
-    @Test func titlebarReminderExpandsLeftWithoutMovingGear() async throws {
+    @Test func titlebarReminderWorksWithoutSettingsButton() async throws {
         _ = NSApplication.shared
         let updates = UpdateController()
         let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 420, height: 540),
@@ -17,8 +17,7 @@ struct SoftwareUpdateTests {
         defer { bar.stop() }
         let controls = try #require(window.titlebarAccessoryViewControllers.first?.view as? UpdateTitlebarControls)
         window.contentView?.superview?.layoutSubtreeIfNeeded()
-        let originalX = controls.gear.convert(controls.gear.bounds, to: nil).midX
-        #expect(controls.frame.width == 36 && controls.reminder.isHidden)
+        #expect(controls.frame.width == 0 && controls.reminder.isHidden)
         for (phase, label) in [(UpdatePhase.available, "有更新"), (.downloading, "下载中 35%"),
                                (.ready, "查看更新"), (.idle, "")] {
             updates.state.expectedBytes = 100
@@ -26,13 +25,11 @@ struct SoftwareUpdateTests {
             updates.state.phase = phase
             try await Task.sleep(for: .milliseconds(50))
             window.contentView?.superview?.layoutSubtreeIfNeeded()
-            let gearX = controls.gear.convert(controls.gear.bounds, to: nil).midX
-            #expect(abs(gearX - originalX) < 0.5)
             if label.isEmpty {
-                #expect(controls.frame.width == 36 && controls.reminder.isHidden)
+                #expect(controls.frame.width == 0 && controls.reminder.isHidden)
             } else {
                 #expect(controls.reminder.accessibilityLabel() == label)
-                #expect(controls.reminder.frame.maxX < controls.gear.frame.minX)
+                #expect(controls.frame.width == controls.reminder.frame.width)
             }
         }
         #expect(window.titlebarAccessoryViewControllers.count == 1)

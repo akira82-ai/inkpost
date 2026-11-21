@@ -272,3 +272,11 @@ swift test --no-parallel \
 - 知乎、即刻、X、微博复用 `RetryEditorReset`：原生键盘清空正文、原生字段操作清空标题，附件根据已知区域内当前可唯一识别的删除/移除语义控件执行原生点击，并等待数量下降。未知控件或清空结果不符即停止，不猜测点击、不直接修改 DOM。掘金/B站复用已有确定性移除步骤；掘金重试将清空与插入拆开，中间回读验证。页面脚本单元测试需要 PATH 中可用的 Node.js（与 ego 浏览器运行时相同的脚本语言）。
 
 - 0.22.0 交付验证（2026-11-21）：全量串行回归 147 tests / 27 suites 通过（225.881 秒，`/tmp/inkpost-0220-tests.log`）；正式签名 release 构建、strict/deep 验签、DMG 完整性、ZIP 解压验签、版本、SHA256、签名 appcast、脚本语法及差异检查通过。本次仅打包，不安装、替换或启动本机应用；各真实网站重试、附件删除兼容性及正式应用完整交接仍待现场验收，#65 保持开启。
+
+## 菜单栏右键菜单（#67，2026-11-21）
+
+- `NativeMenuBar` 监听左、右键 mouse-up；左键沿用主窗口唤起入口，右键弹出原生 `NSMenu`。菜单顺序为打开、设置、检查更新、分隔线、关于、退出。设置复用 Settings scene，更新复用 UpdateController.show，关于使用系统标准面板，退出调用 NSApp.terminate，沿用现有退出策略。
+- `UpdateTitlebarControls` 移除齿轮，只保留现有更新提示。未调整普通退出的任务／稿件策略；当前退出保护仍以 AppLifecycle 现有实现为准。
+- 使用独立 `.build/issue67` 缓存完成编译及 NativeMenuBarTests、SoftwareUpdateTests：20 项测试／2 个套件通过。默认缓存存在旧 publishflow 路径的 PCH 冲突，未删除原缓存。菜单实际弹出、关于面板及跨桌面设置窗口视觉仍待现场验收；本轮未安装或启动新版。
+
+- 0.23.0 交付复核：完整串行回归 151 tests / 27 suites 通过（226.446 秒，`/tmp/inkpost-0230-tests.log`）；release 构建、正式代码签名、DMG 完整性、ZIP 解压验签、版本、SHA256、签名 appcast、脚本语法及差异检查通过。本次仅打包交付，不安装、替换或启动本机新版；上述现场验收仍待完成，#67 保持开启。

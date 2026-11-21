@@ -2,18 +2,15 @@ import AppKit
 import Observation
 import PublishKit
 
-/// One trailing accessory: the gear stays at its original right edge as the reminder grows left.
+/// The titlebar retains only the software update reminder.
 @MainActor
 final class UpdateTitlebarControls: NSView {
-    let gear: NSButton
     let reminder = NSButton()
     private let updates: UpdateController?
 
-    init(gear: NSButton, updates: UpdateController?) {
-        self.gear = gear
+    init(updates: UpdateController?) {
         self.updates = updates
-        super.init(frame: NSRect(x: 0, y: 0, width: 36, height: 28))
-        addSubview(gear)
+        super.init(frame: NSRect(x: 0, y: 0, width: 0, height: 28))
         reminder.isBordered = false
         reminder.target = self
         reminder.action = #selector(showUpdate)
@@ -53,9 +50,8 @@ final class UpdateTitlebarControls: NSView {
         reminder.setAccessibilityLabel(label)
         reminder.isHidden = label == nil
         let reminderWidth = label == nil ? 0 : ceil(title.size().width) + 14
-        let width = 36 + (label == nil ? 0 : reminderWidth + 8)
+        let width = reminderWidth
         setFrameSize(NSSize(width: width, height: 28))
-        gear.frame = NSRect(x: width - 36, y: 0, width: 36, height: 28)
         reminder.frame = NSRect(x: 0, y: 2, width: reminderWidth, height: 24)
         invalidateIntrinsicContentSize()
     }

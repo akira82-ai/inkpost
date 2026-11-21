@@ -15,6 +15,8 @@ final class NativeMenuBar: NSObject, NSWindowDelegate {
     private let controller: DispatchController
     private let presentation: TaskPresentation
     private let showSettings: () -> Void
+    private let updates: UpdateController?
+    let contextMenu = NSMenu()
     private var pulseTimer: Timer?
     private var accessibilityObserver: NSObjectProtocol?
     private var appearanceObservation: NSKeyValueObservation?
@@ -33,11 +35,14 @@ final class NativeMenuBar: NSObject, NSWindowDelegate {
         self.controller = controller
         self.presentation = presentation
         self.showSettings = openSettings
+        self.updates = updates
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
         guard let button = item.button else { return }
         button.target = self
-        button.action = #selector(showMainWindow)
+        button.action = #selector(statusItemClicked)
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        configureContextMenu()
         button.imagePosition = .imageLeading
         button.font = .menuBarFont(ofSize: 0)
         mainWindow.title = "墨驿"
@@ -59,11 +64,7 @@ final class NativeMenuBar: NSObject, NSWindowDelegate {
         mainWindow.hidesOnDeactivate = false
         mainWindow.delegate = self
         let accessory = NSTitlebarAccessoryViewController()
-        let gear = NSButton(image: NSImage(systemSymbolName: "gearshape", accessibilityDescription: "设置")!,
-                            target: self, action: #selector(openSettingsWindow))
-        gear.isBordered = false
-        gear.toolTip = "设置"
-        accessory.view = UpdateTitlebarControls(gear: gear, updates: updates)
+        accessory.view = UpdateTitlebarControls(updates: updates)
         accessory.layoutAttribute = .right
         mainWindow.addTitlebarAccessoryViewController(accessory)
         accessibilityObserver = NSWorkspace.shared.notificationCenter.addObserver(
@@ -251,7 +252,38 @@ final class NativeMenuBar: NSObject, NSWindowDelegate {
         mainWindow.orderOut(nil)
     }
 
+    private func configureContextMenu() {
+        let entries: [(String, Selector, String)] = [
+            ("打开墨驿", #selector(showMainWindow), ""),
+            ("设置…", #selector(openSettingsWindow), ","),
+            ("检查更新…", #selector(checkForUpdates), ""),
+            ("关于墨驿", #selector(showAbout), ""),
+            ("退出墨驿", #selector(quit), "q")
+        ]
+        for (index, entry) in entries.enumerated() {
+            if index == 3 { contextMenu.addItem(.separator()) }
+            let menuItem = NSMenuItem(title: entry.0, action: entry.1, keyEquivalent: entry.2)
+            menuItem.target = self
+            contextMenu.addItem(menuItem)
+        }
+    }
+
+    @objc private func statusItemClicked() {
+        guard NSApp.currentEvent?.type == .rightMouseUp else {
+            showMainWindow()
+            return
+        }
+        guard let button = item.button else { return }
+        contextMenu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.minY), in: button)
+    }
+
     @objc private func openSettingsWindow() { showSettings() }
+    @objc private func checkForUpdates() { updates?.show() }
+    @objc private func showAbout() {
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "墨驿"])
+    }
+    @objc private func quit() { NSApp.terminate(nil) }
     @objc private func minimizeToBackground() { hideMainWindow() }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {

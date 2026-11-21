@@ -1,5 +1,6 @@
 // Isolated end-to-end fixture. Never uses the production app's identity or lock.
 import AppKit
+import SwiftUI
 import Sparkle
 import PublishKit
 
@@ -12,6 +13,8 @@ final class UpdateHarness: NSObject, NSApplicationDelegate {
     private var previousPhase = ""
     private let started = Date()
     private var waitingSince: Date?
+    private var window: NSWindow?
+    private var restartRequested = false
     private var root: URL { URL(fileURLWithPath: Bundle.main.object(forInfoDictionaryKey: "UpdateTestRoot") as! String) }
 
     private func log(_ line: String) {
@@ -35,6 +38,15 @@ final class UpdateHarness: NSObject, NSApplicationDelegate {
             let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as! String
             log("START \(version) PID \(getpid())")
             if version == "2.0" { log("SUCCESS NEW VERSION SINGLE OWNER"); NSApp.terminate(nil); return }
+            let window = NSWindow(contentRect: NSRect(x: 50, y: 50, width: 420, height: 300),
+                                  styleMask: [.titled], backing: .buffered, defer: false)
+            self.window = window
+            window.contentView = NSHostingView(rootView: HarnessSheet(driver: driver) { [weak self] in
+                guard let self else { return }
+                self.log("SWIFTUI SHEET DISMISS CALLBACK")
+                self.driver.presentationDidDismiss()
+            })
+            window.orderFront(nil)
             // Only this fixture permits loopback HTTP. Production start() requires HTTPS.
             updater = SPUUpdater(hostBundle: .main, applicationBundle: .main, userDriver: driver, delegate: driver)
             try updater.start()
@@ -60,11 +72,34 @@ final class UpdateHarness: NSObject, NSApplicationDelegate {
             guard let waitingSince else { self.waitingSince = Date(); log("WAITING FOR EXPLICIT DOWNLOAD"); return }
             if Date().timeIntervalSince(waitingSince) > 0.5 { driver.beginDownload() }
         }
-        if phase == .ready { driver.restart() }
-        if phase == .failed || phase == .latest { NSApp.terminate(nil) }
+        if phase == .ready, !restartRequested {
+            if !driver.state.isPresented { driver.state.isPresented = true; return }
+            guard window?.attachedSheet != nil else { return }
+            log("RESTART WITH SHEET ATTACHED")
+            restartRequested = true
+            driver.restart()
+        }
+        if phase == .failed || phase == .latest {
+            driver.dismiss()
+            if window?.attachedSheet == nil { NSApp.terminate(nil) }
+        }
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard window?.attachedSheet == nil else { log("ERROR QUIT WHILE SHEET ATTACHED"); return .terminateCancel }
+        log("SHEET DISMISSED BEFORE INSTALL")
         log("TERMINATE")
         return .terminateNow
+    }
+}
+
+private struct HarnessSheet: View {
+    let driver: UpdateController
+    let dismissed: () -> Void
+    var body: some View {
+        @Bindable var model = driver.state
+        Text("Isolated update regression")
+            .sheet(isPresented: $model.isPresented, onDismiss: dismissed) {
+                Text("Update ready").frame(width: 300, height: 150)
+            }
     }
 }

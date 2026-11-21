@@ -1,5 +1,14 @@
 # 开发参考资料
 
+## 自动更新退出交接修复（#66，2026-11-21）
+
+- 用户现场 0.21.2 → 0.22.0 卡在安装重启。系统日志于 10:40:00 和 10:40:12 确认收到 Sparkle 的 quit AppleEvent，但 AppKit 报 `App termination blocked by modal sheet`。更新包 EdDSA 校验通过，现场旧进程仍运行；不是已确认的签名失败或单进程锁问题。
+- 重启操作先隐藏更新 sheet，等待 SwiftUI `onDismiss`；若原生窗口仍有 attached sheet，则继续等待 `NSWindow.didEndSheetNotification`，之后重新检查任务/稿件安全，才调用 Sparkle 安装或重试退出回调。不使用固定动画延迟，不强杀进程。
+- 更新面板只在存在可执行回调时允许重启/重试退出，错误或会话结束会取消待交接动作及通知监听。系统日志增加准备就绪、面板关闭、安装回调和退出安全判断，不记录稿件内容。
+- 隔离正式签名回归：`INKPOST_BUILD_PATH=.build/issue66-update` 运行 `Scripts/test-update.sh`，使用独立 bundle ID 和锁；真实 SwiftUI sheet 打开后点击重启，确认原生 sheet 移除、旧进程退出、1.0 → 2.0 安装重启和单实例；篡改 ZIP 与签名清单均被拒绝。证据目录 `/tmp/inkpost-update-test.FnENoC/`（各场景日志在对应子目录的 `events.txt`）。更新专项 12 项通过，包括原生 sheet 移除前不能安装、重复点击、退出前重新检查稿件、失败取消待执行动作及退出保护。未重触发用户现场安装，未替换本机墨驿。
+
+- 0.22.1 提交复核：完整串行回归 151 tests / 27 suites 通过（227.554 秒，`/tmp/inkpost-0221-tests.log`）；正式签名 release 构建、strict/deep 验签、DMG 完整性、ZIP 解压验签、版本、SHA256、签名 appcast、脚本语法与差异检查通过。仅打包交付，不安装、替换或启动本机墨驿；用户原现场升级仍待复验，#66 保持开启。
+
 以下内容从 AGENTS.md 移出，保留为既有技术方案与操作参考，不作为新需求的约束，也不代表这些方案必须继续沿用。涉及变更时以用户确认的需求、当前代码和实际验证结果为准。
 
 ## 发布版本号

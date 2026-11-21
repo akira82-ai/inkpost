@@ -77,6 +77,8 @@ PY
   done
   cat "$CASE_ROOT/events.txt"
   if [[ "$SCENARIO" == valid ]]; then
+    rg -q 'RESTART WITH SHEET ATTACHED' "$CASE_ROOT/events.txt"
+    rg -q 'SHEET DISMISSED BEFORE INSTALL' "$CASE_ROOT/events.txt"
     rg -q 'SUCCESS NEW VERSION SINGLE OWNER' "$CASE_ROOT/events.txt"
     [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$CASE_ROOT/installed/UpdateHarness.app/Contents/Info.plist")" == 2.0 ]]
   else

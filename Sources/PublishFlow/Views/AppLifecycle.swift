@@ -1,9 +1,11 @@
 import AppKit
 import UserNotifications
+import OSLog
 import PublishKit
 
 @MainActor
 final class AppLifecycle: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    private let updateLogger = Logger(subsystem: "com.publishflow.app", category: "Updates")
     private var controller: DispatchController?
     private var pendingNotificationRoutes: [(UUID?, Int?)] = []
     private var menuBar: NativeMenuBar?
@@ -12,11 +14,13 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, UNUserNotificationCen
     func configureUpdates(_ updates: UpdateController) { self.updates = updates }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if let updates, updates.state.installSessionActive, let reason = updates.blockingReason {
+            updateLogger.notice("Application termination refused: task or draft requires attention")
             updates.state.message = reason
             updates.state.isPresented = true
             showMainWindow()
             return .terminateCancel
         }
+        updateLogger.notice("Application termination allowed")
         return .terminateNow
     }
     func installMenuBar(controller: DispatchController, presentation: TaskPresentation, window: NSWindow, updates: UpdateController? = nil, openSettings: @escaping () -> Void) {

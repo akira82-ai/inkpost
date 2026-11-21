@@ -16,11 +16,16 @@ final class UpdateController: NSObject, SPUUserDriver, SPUUpdaterDelegate {
     @ObservationIgnored private var cancellation: (() -> Void)?
     @ObservationIgnored private var retryTermination: (() -> Void)?
     @ObservationIgnored private var postponedInstall: (() -> Void)?
+    @ObservationIgnored private var restartAfterDismissal = false
+    @ObservationIgnored private var sheetDismissalObserver: NSObjectProtocol?
     @ObservationIgnored private var observation: NSKeyValueObservation?
     @ObservationIgnored private let logger = Logger(subsystem: "com.publishflow.app", category: "Updates")
     @ObservationIgnored var activate: () -> Void = {}
 
     var blockingReason: String? { task.flatMap(UpdateSafety.blockingReason) }
+    var canRestart: Bool {
+        !restartAfterDismissal && (install != nil || postponedInstall != nil || retryTermination != nil)
+    }
     var currentVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "开发构建" }
 
     func start(task: DispatchModel) {
@@ -71,7 +76,49 @@ final class UpdateController: NSObject, SPUUserDriver, SPUUpdaterDelegate {
         choice(.install)
     }
     func restart() {
+        guard canRestart else { return }
         guard blockingReason == nil else { state.message = blockingReason; return }
+        // AppKit rejects Sparkle's quit AppleEvent while our modal sheet is attached.
+        // SwiftUI's onDismiss, not a guessed animation delay, acknowledges its removal.
+        if state.isPresented {
+            restartAfterDismissal = true
+            state.isPresented = false
+            logger.notice("Restart requested; waiting for update sheet dismissal")
+            return
+        }
+        performRestart()
+    }
+    func presentationDidDismiss() {
+        guard restartAfterDismissal else { return }
+        // SwiftUI onDismiss can run before AppKit detaches the actual sheet.
+        // Wait for the native end-sheet notification rather than an animation timer.
+        if let window = NSApp?.windows.first(where: { $0.attachedSheet != nil }) {
+            guard sheetDismissalObserver == nil else { return }
+            sheetDismissalObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didEndSheetNotification, object: window, queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.stopObservingSheet()
+                    self?.presentationDidDismiss()
+                }
+            }
+            return
+        }
+        restartAfterDismissal = false
+        logger.notice("Update sheet dismissed; handing restart to Sparkle")
+        performRestart()
+    }
+    private func stopObservingSheet() {
+        if let sheetDismissalObserver { NotificationCenter.default.removeObserver(sheetDismissalObserver) }
+        sheetDismissalObserver = nil
+    }
+    private func performRestart() {
+        guard blockingReason == nil else {
+            state.message = blockingReason
+            state.isPresented = true
+            logger.notice("Restart postponed to protect task or draft")
+            return
+        }
         state.message = nil
         if let postponedInstall {
             self.postponedInstall = nil
@@ -102,6 +149,8 @@ final class UpdateController: NSObject, SPUUserDriver, SPUUpdaterDelegate {
         state.message = (error as NSError).localizedDescription
         state.installSessionActive = false
         state.canCancel = false
+        restartAfterDismissal = false
+        stopObservingSheet()
         choice = nil; install = nil; cancellation = nil; postponedInstall = nil; retryTermination = nil
     }
 
@@ -182,6 +231,7 @@ final class UpdateController: NSObject, SPUUserDriver, SPUUpdaterDelegate {
         state.extractionProgress = progress.isFinite ? min(1, max(0, progress)) : 0
     }
     func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) {
+        logger.notice("Sparkle update ready for explicit restart")
         install = reply
         state.phase = .ready
         state.message = nil
@@ -189,8 +239,12 @@ final class UpdateController: NSObject, SPUUserDriver, SPUUpdaterDelegate {
         // Wait for an explicit restart click, even if the original download was authorized.
     }
     func showInstallingUpdate(withApplicationTerminated applicationTerminated: Bool, retryTerminatingApplication: @escaping () -> Void) {
+        logger.notice("Sparkle installing; applicationTerminated=\(applicationTerminated)")
         state.phase = .installing
-        if !applicationTerminated { retryTermination = retryTerminatingApplication }
+        retryTermination = applicationTerminated ? nil : retryTerminatingApplication
+        if !applicationTerminated {
+            state.message = "正在等待墨驿退出后安装更新；如长时间没有退出，可点击菜单栏的查看更新重试。"
+        }
     }
     func showUpdateInstalledAndRelaunched(_ relaunched: Bool, acknowledgement: @escaping () -> Void) {
         state.phase = .idle
@@ -199,6 +253,8 @@ final class UpdateController: NSObject, SPUUserDriver, SPUUpdaterDelegate {
         acknowledgement()
     }
     func dismissUpdateInstallation() {
+        restartAfterDismissal = false
+        stopObservingSheet()
         choice = nil; install = nil; cancellation = nil; postponedInstall = nil; retryTermination = nil
         state.canCancel = false
         state.installSessionActive = false

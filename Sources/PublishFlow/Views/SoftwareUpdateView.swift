@@ -68,7 +68,8 @@ struct SoftwareUpdateView: View {
             primary("下载并更新", action: controller.beginDownload)
                 .disabled(controller.blockingReason != nil || model.informationOnly)
         } else if model.phase == .ready || model.phase == .installing {
-            primary("重启并使用新版", action: controller.restart).disabled(controller.blockingReason != nil)
+            primary(model.phase == .ready ? "重启并使用新版" : "重试退出并更新", action: controller.restart)
+                .disabled(controller.blockingReason != nil || !controller.canRestart)
         } else if [.idle, .failed, .latest].contains(model.phase) {
             primary("检查更新", action: controller.check).disabled(!model.isConfigured || !model.canCheck)
         }
@@ -118,7 +119,7 @@ struct UpdatePresentation: ViewModifier {
     let controller: UpdateController
     func body(content: Content) -> some View {
         @Bindable var model = controller.state
-        content.sheet(isPresented: $model.isPresented) {
+        content.sheet(isPresented: $model.isPresented, onDismiss: controller.presentationDidDismiss) {
             SoftwareUpdateView(controller: controller, model: model)
         }
     }

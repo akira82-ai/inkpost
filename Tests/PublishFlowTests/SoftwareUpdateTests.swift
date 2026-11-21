@@ -109,6 +109,81 @@ struct SoftwareUpdateTests {
         #expect(!updates.state.installSessionActive)
     }
 
+    @Test func restartWaitsForSheetDismissalAndRunsOnce() {
+        let updates = UpdateController()
+        var installs = 0
+        updates.showReady(toInstallAndRelaunch: { _ in installs += 1 })
+        updates.state.isPresented = true
+        updates.restart(); updates.restart()
+        #expect(!updates.state.isPresented && installs == 0)
+        #expect(!updates.canRestart)
+        updates.presentationDidDismiss(); updates.presentationDidDismiss()
+        #expect(installs == 1 && updates.state.phase == .installing)
+        #expect(!updates.canRestart)
+    }
+
+    @Test func dismissalRechecksDraftAndInstallerFailureCancelsPendingRestart() {
+        let updates = UpdateController(), task = DispatchModel()
+        updates.start(task: task)
+        var installs = 0
+        updates.showReady(toInstallAndRelaunch: { _ in installs += 1 })
+        updates.state.isPresented = true
+        updates.restart()
+        task.markdown = "new draft during dismissal"
+        updates.presentationDidDismiss()
+        #expect(installs == 0 && updates.state.isPresented)
+        #expect(updates.state.message != nil && task.markdown == "new draft during dismissal")
+        task.markdown = ""
+        updates.restart()
+        updates.showUpdaterError(NSError(domain: "test", code: 2), acknowledgement: {})
+        updates.presentationDidDismiss()
+        #expect(installs == 0 && updates.state.phase == .failed)
+    }
+
+    @Test func swiftUIDismissalMustAlsoWaitForNativeSheetDetachment() async throws {
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: NSRect(x: 50, y: 50, width: 420, height: 300),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let sheet = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100),
+                             styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        sheet.isReleasedWhenClosed = false
+        defer { window.orderOut(nil); sheet.orderOut(nil) }
+        window.orderFront(nil)
+        window.beginSheet(sheet, completionHandler: { _ in })
+        let updates = UpdateController()
+        var installs = 0
+        updates.showReady(toInstallAndRelaunch: { _ in
+            #expect(window.attachedSheet == nil)
+            installs += 1
+        })
+        updates.state.isPresented = true
+        updates.restart()
+        updates.presentationDidDismiss()
+        #expect(installs == 0)
+        window.endSheet(sheet)
+        for _ in 0..<100 where installs == 0 { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(installs == 1)
+    }
+
+    @Test func retryQuitAlsoWaitsForSheetAndOrdinaryDismissNeverInstalls() {
+        let updates = UpdateController()
+        var quits = 0
+        updates.showInstallingUpdate(withApplicationTerminated: false, retryTerminatingApplication: { quits += 1 })
+        updates.state.isPresented = true
+        updates.dismiss(); updates.presentationDidDismiss()
+        #expect(quits == 0)
+        updates.state.isPresented = true
+        updates.restart()
+        #expect(quits == 0)
+        updates.presentationDidDismiss()
+        #expect(quits == 1)
+        updates.showInstallingUpdate(withApplicationTerminated: true, retryTerminatingApplication: { quits += 1 })
+        #expect(!updates.canRestart)
+        updates.restart()
+        #expect(quits == 1)
+    }
+
     @Test func noUpdateIsNotTurnedIntoGenericFailure() {
         let updates = UpdateController()
         let updater = SPUUpdater(hostBundle: .main, applicationBundle: .main, userDriver: updates, delegate: updates)

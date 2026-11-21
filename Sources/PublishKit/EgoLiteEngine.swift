@@ -40,13 +40,28 @@ public struct EgoLiteEngine {
     public init(binaryPath: String? = nil) throws {
         if let binaryPath {
             self.binaryPath = binaryPath
-        } else if let found = (try? Shell.capture("/usr/bin/which", ["ego-browser"]))?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-            !found.isEmpty, FileManager.default.isExecutableFile(atPath: found) {
-            self.binaryPath = found
         } else {
-            throw EngineError.binaryNotFound
+            self.binaryPath = try Self.resolveBinaryPath(
+                searchPath: ProcessInfo.processInfo.environment["PATH"] ?? "",
+                homeDirectory: FileManager.default.homeDirectoryForCurrentUser.path
+            )
         }
+    }
+
+    /// Finder/Sparkle launches inherit only the system PATH, unlike a login shell.
+    /// Resolve the official per-user CLI install as well as existing absolute PATH entries.
+    static func resolveBinaryPath(
+        searchPath: String,
+        homeDirectory: String,
+        isExecutable: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }
+    ) throws -> String {
+        let directories = searchPath.split(separator: ":").map(String.init)
+            + [homeDirectory + "/.local/bin", "/opt/homebrew/bin", "/usr/local/bin"]
+        for directory in directories where directory.hasPrefix("/") {
+            let candidate = URL(fileURLWithPath: directory).appendingPathComponent("ego-browser").path
+            if isExecutable(candidate) { return candidate }
+        }
+        throw EngineError.binaryNotFound
     }
 
     // MARK: - CLI 模拟流程

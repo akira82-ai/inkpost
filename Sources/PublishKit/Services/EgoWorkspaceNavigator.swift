@@ -1,4 +1,5 @@
 import AppKit
+import OSLog
 
 enum WorkspaceNavigationError: LocalizedError {
     case automationDenied
@@ -24,9 +25,35 @@ enum EgoWorkspaceNavigator {
         configuration.activates = true
         configuration.addsToRecentItems = false
         let app = try await workspace.openApplication(at: url, configuration: configuration)
-        guard app.isActive, workspace.frontmostApplication?.processIdentifier == app.processIdentifier else {
-            throw WorkspaceNavigationError.failed("ego 未成为前台应用，内容已保留")
+        // LaunchServices completion acknowledges the open request, not completed activation.
+        let logger = Logger(subsystem: "com.publishflow.app", category: "ego-navigation")
+        logger.notice("Activation requested, targetPID=\(app.processIdentifier)")
+        do {
+            try await waitForActivation {
+                guard !app.isTerminated else {
+                    throw WorkspaceNavigationError.failed("ego 已退出，内容已保留")
+                }
+                return app.isActive && workspace.frontmostApplication?.processIdentifier == app.processIdentifier
+            }
+            logger.notice("Activation confirmed, targetPID=\(app.processIdentifier)")
+        } catch {
+            logger.error("Activation failed, targetPID=\(app.processIdentifier), frontPID=\(workspace.frontmostApplication?.processIdentifier ?? -1): \(error.localizedDescription, privacy: .public)")
+            throw error
         }
+    }
+
+    /// Observe one activation request; never repeatedly steal focus or report unconfirmed success.
+    @MainActor static func waitForActivation(
+        attempts: Int = 40,
+        isActive: () throws -> Bool,
+        pause: () async throws -> Void = { try await Task.sleep(for: .milliseconds(50)) }
+    ) async throws {
+        for observation in 0..<attempts {
+            try Task.checkCancellation()
+            if try isActive() { return }
+            if observation + 1 < attempts { try await pause() }
+        }
+        throw WorkspaceNavigationError.failed("ego 未成为前台应用，内容已保留")
     }
 
     /// Observe without activating ego or changing its selected Space/tab.

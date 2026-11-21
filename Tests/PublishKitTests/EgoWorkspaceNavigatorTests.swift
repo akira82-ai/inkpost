@@ -4,6 +4,35 @@ import Testing
 
 @MainActor
 struct EgoWorkspaceNavigatorTests {
+    @Test func delayedActivationIsObservedWithoutReissuingRequest() async throws {
+        var observations = 0
+        var pauses = 0
+        try await EgoWorkspaceNavigator.waitForActivation(attempts: 4, isActive: {
+            observations += 1
+            return observations == 3
+        }, pause: { pauses += 1 })
+        #expect(observations == 3)
+        #expect(pauses == 2)
+    }
+
+    @Test func activationTimeoutDoesNotReportSuccess() async {
+        var pauses = 0
+        await #expect(throws: WorkspaceNavigationError.self) {
+            try await EgoWorkspaceNavigator.waitForActivation(attempts: 3, isActive: { false }, pause: { pauses += 1 })
+        }
+        #expect(pauses == 2)
+    }
+
+    @Test func terminatedTargetFailsImmediately() async {
+        var pauses = 0
+        await #expect(throws: WorkspaceNavigationError.self) {
+            try await EgoWorkspaceNavigator.waitForActivation(isActive: {
+                throw WorkspaceNavigationError.failed("terminated")
+            }, pause: { pauses += 1 })
+        }
+        #expect(pauses == 0)
+    }
+
     @Test(arguments: [-1, 0, Int(Int32.max) + 1])
     func invalidWindowIdentityFailsBeforeClaimingAnySpace(windowID: Int) throws {
         #expect(throws: WorkspaceNavigationError.self) {

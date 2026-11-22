@@ -35,6 +35,29 @@ struct SoftwareUpdateTests {
         #expect(window.titlebarAccessoryViewControllers.count == 1)
     }
 
+    @Test func contextMenuReflectsUpdateStateAndReleasesStatusItem() {
+        _ = NSApplication.shared
+        let updates = UpdateController()
+        updates.state.isConfigured = true
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 540),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let bar = NativeMenuBar(controller: DispatchController(service: DispatchService(), settings: DispatchSettings()),
+                                presentation: TaskPresentation(), openSettings: {}, window: window, updates: updates)
+        defer { bar.stop() }
+        for (phase, title, enabled) in [(UpdatePhase.idle, "检查更新…", true),
+            (.checking, "正在检查更新…", false), (.downloading, "正在下载更新…", false),
+            (.extracting, "正在准备更新…", false), (.ready, "重启并使用新版…", true),
+            (.installing, "正在安装并重启…", false), (.failed, "查看更新问题…", true)] {
+            updates.state.phase = phase
+            bar.menuWillOpen(bar.contextMenu)
+            #expect(bar.contextMenu.item(at: 2)?.title == title)
+            #expect(bar.contextMenu.item(at: 2)?.isEnabled == enabled)
+        }
+        bar.item.menu = bar.contextMenu
+        bar.menuDidClose(bar.contextMenu)
+        #expect(bar.item.menu == nil)
+    }
+
     @Test func everyInMemoryContentAndTaskStateBlocksRestart() {
         let task = DispatchModel()
         #expect(UpdateSafety.blockingReason(task) == nil)

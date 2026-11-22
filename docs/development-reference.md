@@ -291,3 +291,7 @@ swift test --no-parallel \
 - 使用独立 `.build/issue67` 缓存完成编译及 NativeMenuBarTests、SoftwareUpdateTests：20 项测试／2 个套件通过。默认缓存存在旧 publishflow 路径的 PCH 冲突，未删除原缓存。菜单实际弹出、关于面板及跨桌面设置窗口视觉仍待现场验收；本轮未安装或启动新版。
 
 - 0.23.0 交付复核：完整串行回归 151 tests / 27 suites 通过（226.446 秒，`/tmp/inkpost-0230-tests.log`）；release 构建、正式代码签名、DMG 完整性、ZIP 解压验签、版本、SHA256、签名 appcast、脚本语法及差异检查通过。本次仅打包交付，不安装、替换或启动本机新版；上述现场验收仍待完成，#67 保持开启。
+
+- #67 参考 Echo：右键临时绑定 NSStatusItem.menu 并由状态按钮触发系统菜单，NSMenuDelegate.menuDidClose 解除绑定；menuWillOpen 刷新更新文案与可用性。此路径仍需正式应用现场验证图标高亮、弹出定位和左右键连续切换。
+
+- 0.23.2 交付复核（2026-11-22）：全量串行回归 159 tests / 28 suites 执行完毕（226.652 秒），仅微博图片 reordered 场景因系统剪贴板被修改而触发所有权保护失败；随后单独复跑完整 WeiboImageTests 六个场景全部通过（25.742 秒），未修改相关代码。其余测试及本轮菜单状态回归通过。日志 `/tmp/inkpost-0232-tests.log`、`/tmp/inkpost-0232-weibo-retest.log`。release 构建、正式签名、DMG 完整性、ZIP 解压验签、版本、SHA256、签名 appcast、脚本语法及差异检查通过。仅打包交付，不安装或启动本机新版；#67 保持开启待现场验收。

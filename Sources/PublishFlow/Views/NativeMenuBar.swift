@@ -7,7 +7,7 @@ import OSLog
 
 /// Own the status button directly: animation never re-renders a SwiftUI label or its layout.
 @MainActor
-final class NativeMenuBar: NSObject, NSWindowDelegate {
+final class NativeMenuBar: NSObject, NSWindowDelegate, NSMenuDelegate {
     let item: NSStatusItem
     let mainWindow: NSWindow
     let revealAnimator = WindowRevealAnimator()
@@ -253,6 +253,8 @@ final class NativeMenuBar: NSObject, NSWindowDelegate {
     }
 
     private func configureContextMenu() {
+        contextMenu.delegate = self
+        contextMenu.autoenablesItems = false
         let entries: [(String, Selector, String)] = [
             ("打开墨驿", #selector(showMainWindow), ""),
             ("设置…", #selector(openSettingsWindow), ","),
@@ -274,7 +276,31 @@ final class NativeMenuBar: NSObject, NSWindowDelegate {
             return
         }
         guard let button = item.button else { return }
-        contextMenu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.minY), in: button)
+        item.menu = contextMenu
+        button.performClick(nil)
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        guard menu === contextMenu, let entry = menu.item(at: 2) else { return }
+        guard let state = updates?.state else {
+            entry.isEnabled = false
+            return
+        }
+        switch state.phase {
+        case .checking: entry.title = "正在检查更新…"
+        case .available: entry.title = "发现新版本…"
+        case .downloading: entry.title = "正在下载更新…"
+        case .extracting: entry.title = "正在准备更新…"
+        case .ready: entry.title = "重启并使用新版…"
+        case .installing: entry.title = "正在安装并重启…"
+        case .failed: entry.title = "查看更新问题…"
+        case .idle, .latest: entry.title = "检查更新…"
+        }
+        entry.isEnabled = state.isConfigured && ![.checking, .downloading, .extracting, .installing].contains(state.phase)
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        if menu === contextMenu { item.menu = nil }
     }
 
     @objc private func openSettingsWindow() { showSettings() }

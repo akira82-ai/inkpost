@@ -295,3 +295,12 @@ swift test --no-parallel \
 - #67 参考 Echo：右键临时绑定 NSStatusItem.menu 并由状态按钮触发系统菜单，NSMenuDelegate.menuDidClose 解除绑定；menuWillOpen 刷新更新文案与可用性。此路径仍需正式应用现场验证图标高亮、弹出定位和左右键连续切换。
 
 - 0.23.2 交付复核（2026-11-22）：全量串行回归 159 tests / 28 suites 执行完毕（226.652 秒），仅微博图片 reordered 场景因系统剪贴板被修改而触发所有权保护失败；随后单独复跑完整 WeiboImageTests 六个场景全部通过（25.742 秒），未修改相关代码。其余测试及本轮菜单状态回归通过。日志 `/tmp/inkpost-0232-tests.log`、`/tmp/inkpost-0232-weibo-retest.log`。release 构建、正式签名、DMG 完整性、ZIP 解压验签、版本、SHA256、签名 appcast、脚本语法及差异检查通过。仅打包交付，不安装或启动本机新版；#67 保持开启待现场验收。
+
+## 设置布局与依赖管理（#70）
+
+- ContentView 使用紧凑侧栏与可滚动内容区，复用 ShortcutSettings、SoftwareUpdateSettings；不增加第二套配置存储。
+- EgoDependencyController 在设置打开与应用重新激活时检查安装、进程和 CLI 连接，不更改任务归属。EgoDependencyInstaller 使用 ego-browser 官方 macOS 安装脚本的分架构分发地址；发布者 Team ID JGQLC6YQYJ 来自本机正式 ego lite 签名。签名校验与 Gatekeeper 评估通过后才安装到 ~/Applications，不覆盖已有应用。
+- AI 配置尚无业务服务，原型中的输入表单未作为可用能力落地。ego Lite 安装链路未在本机实际执行，避免改动现有浏览器环境；不将编译通过作为下载、安装及首次引导已验收的证据。
+- 本轮验证：独立 `.build/issue70` 编译通过；设置布局、快捷键、菜单栏和更新专项 29 tests / 4 suites 通过（`/tmp/inkpost70-final-tests.log`）。原生 NSHostingView 渲染截图确认紧凑导航与内容布局，测试检查稿件未修改。未安装或启动新版应用，未执行实际下载安装，未对 AI 能力作已完成声明。
+
+- 0.24.0 交付复核（2026-11-23）：全量串行回归通过（160 tests / 29 suites，227.143 秒），设置测试保留尺寸与稿件断言，移除固定路径截图输出。Release 构建、代码签名、DMG 完整性、ZIP 解压验签、版本、SHA256、自动更新清单签名及脚本语法检查通过。ego Lite 下载、实际安装、首次引导及键盘焦点交互待现场验收，#70 保持开启。

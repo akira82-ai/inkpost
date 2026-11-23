@@ -3,23 +3,37 @@ import KeyboardShortcuts
 
 struct ShortcutSettings: View {
     @Bindable var controller: ShortcutController
+    @State private var enabled: Bool
+    @State private var previous: KeyboardShortcuts.Shortcut
+
+    init(controller: ShortcutController) {
+        self.controller = controller
+        _enabled = State(initialValue: controller.shortcut != nil)
+        _previous = State(initialValue: controller.shortcut ?? ShortcutController.defaultShortcut)
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("全局快捷键").font(InkStyle.font(13, weight: .semibold))
-            KeyboardShortcuts.Recorder("显示／隐藏墨驿", shortcut: $controller.shortcut, onChange: controller.save)
-            Text("默认 ⌘＋'（单引号）。点击录入可修改，清除即停用；墨驿运行时有效。")
-                .font(InkStyle.font(12)).foregroundStyle(InkStyle.muted)
+        VStack(alignment: .leading, spacing: 14) {
+            KeyboardShortcuts.Recorder("显示 / 隐藏发布窗口", shortcut: $controller.shortcut, onChange: controller.save)
+            Divider()
+            Toggle("启用全局快捷键", isOn: $enabled).toggleStyle(.switch)
             if let message = controller.message {
                 HStack(alignment: .top) {
-                    Text(message).font(InkStyle.font(12)).foregroundStyle(.red)
+                    Text(message).foregroundStyle(.red)
                     Button("重试", action: controller.retry)
                 }
-            } else {
-                Text(controller.isRegistered ? "已启用，切换发布窗口的显示／隐藏，保留内容和任务状态。" :
-                     controller.shortcut == nil ? "已停用，仍可点击菜单栏图标打开。" : "正在设置快捷键…")
-                    .font(InkStyle.font(12)).foregroundStyle(InkStyle.muted)
             }
-        }
+        }.font(InkStyle.font(12))
+            .onChange(of: enabled) { _, value in
+                if value { if controller.shortcut == nil { controller.save(previous) } }
+                else {
+                    if let shortcut = controller.shortcut { previous = shortcut }
+                    controller.save(nil)
+                }
+            }
+            .onChange(of: controller.shortcut) { _, value in
+                if let value { previous = value }
+                enabled = value != nil
+            }
     }
 }

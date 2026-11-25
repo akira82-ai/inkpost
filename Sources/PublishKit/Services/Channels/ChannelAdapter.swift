@@ -45,6 +45,6 @@ public struct ChannelRegistry {
         adapters[platform] = fresh.adapter(for: platform)
     }
     public static var standard: ChannelRegistry {
-        .init([ZhihuChannelAdapter(), JikeChannelAdapter(), XChannelAdapter(), WeiboChannelAdapter(), JuejinChannelAdapter(), BilibiliChannelAdapter(), FixtureChannelAdapter()])
+        .init([ZhihuChannelAdapter(), JikeChannelAdapter(), XChannelAdapter(), WeiboChannelAdapter(), JuejinChannelAdapter(), BilibiliChannelAdapter(), BonjourChannelAdapter(), FixtureChannelAdapter()])
     }
 }

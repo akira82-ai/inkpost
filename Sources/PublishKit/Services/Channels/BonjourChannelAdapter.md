@@ -1,0 +1,10 @@
+# Bonjour adapter maintenance
+
+- Entry: https://bonjour.bio/. Open the visible main-navigation 发帖 button, excluding the hidden duplicate trigger. Scope all editor operations to `[data-community-post-composer-dialog]`.
+- Body: `textarea[data-community-post-composer-input]`; observed autofocus and maxlength=5000 on 2026-11-25. Count UTF-16 units including optional title and separating newline. Do not modify the received request.
+- Reuse ClipboardPasteService and ImageClipboardSession, with native Meta+V only. PNGs come from ChannelExecutionContext.uploadPaths; do not convert assets or call keyboard.paste.
+- Attachment tiles: `[data-community-media-slide]`, kind=image. Wait for loaded image status and a decoded image backed by either a same-origin blob or HTTPS cdn.bonjour.bio URL. Native clipboard paste was observed to retain ready local blob previews; do not claim server upload from preview readiness. Identity excludes CDN resize query; preserve count, order and confirmed identity checkpoints. Never blindly repeat an uncertain paste.
+- Explicit retry removes images through the native 删除配图 1 button and clears the textarea; resume never clears a draft. Opening a populated, conflicting composer preserves it and stops.
+- Login detection uses the observed main-navigation settings link, or visible login controls. Missing or changed structure must fail rather than claim success.
+- Never submit, choose a category, or click a publish shortcut. Check the native submit enabled state as one acceptance signal alongside body and attachment verification. User handles any remaining category selection.
+- Tests include transport stubs and an opt-in real-page test (INKPOST_BONJOUR_LIVE=1, INKPOST_BONJOUR_LIVE_SPACE, INKPOST_BONJOUR_LIVE_PAGE). Real tests fill drafts only; never publish.

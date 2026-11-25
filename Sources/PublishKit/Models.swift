@@ -12,6 +12,7 @@ public enum PlatformID: String, Codable, CaseIterable, Identifiable, Sendable {
     case juejin
     case bilibili
     case x
+    case bonjour
 
     public var id: String { rawValue }
 
@@ -25,6 +26,7 @@ public enum PlatformID: String, Codable, CaseIterable, Identifiable, Sendable {
         case .juejin: return "掘金沸点"
         case .bilibili: return "B站动态"
         case .x: return "X"
+        case .bonjour: return "Bonjour"
         }
     }
 

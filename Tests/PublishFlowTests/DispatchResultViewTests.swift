@@ -40,7 +40,10 @@ struct DispatchResultViewTests {
             window.contentView = hosting
             let size = hosting.fittingSize
             #expect(abs(size.width - 420) < 1)
-            #expect(size.height < 600)
+            // Each additional row of registered channels contributes a 36-point cell and 8-point gap.
+            let channelRows = (ChannelPresentation.all.filter(\.available).count + 2) / 3
+            let heightLimit = 600 + CGFloat(max(0, channelRows - 2) * 44)
+            #expect(size.height < heightLimit)
             hosting.setFrameSize(size)
             hosting.layoutSubtreeIfNeeded()
             if ProcessInfo.processInfo.environment["INKPOST_UI_SNAPSHOTS"] == "1" {

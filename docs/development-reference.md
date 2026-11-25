@@ -304,3 +304,14 @@ swift test --no-parallel \
 - 本轮验证：独立 `.build/issue70` 编译通过；设置布局、快捷键、菜单栏和更新专项 29 tests / 4 suites 通过（`/tmp/inkpost70-final-tests.log`）。原生 NSHostingView 渲染截图确认紧凑导航与内容布局，测试检查稿件未修改。未安装或启动新版应用，未执行实际下载安装，未对 AI 能力作已完成声明。
 
 - 0.24.0 交付复核（2026-11-23）：全量串行回归通过（160 tests / 29 suites，227.143 秒），设置测试保留尺寸与稿件断言，移除固定路径截图输出。Release 构建、代码签名、DMG 完整性、ZIP 解压验签、版本、SHA256、自动更新清单签名及脚本语法检查通过。ego Lite 下载、实际安装、首次引导及键盘焦点交互待现场验收，#70 保持开启。
+
+## Bonjour 适配器（#71，2026-11-25）
+
+- 新增 BonjourChannelAdapter，通过 ChannelAdapter/ChannelRegistry 接入；PlatformID 增加 bonjour，现有渠道列表自动展示。未修改公共分发、素材和剪贴板实现。
+- 维护说明见 [Bonjour adapter maintenance](../Sources/PublishKit/Services/Channels/BonjourChannelAdapter.md)。正文和有序 PNG 均使用公共剪贴板服务；保留用户新复制内容、原始请求与已有不同草稿，支持登录恢复、重试清理、取消及不明确写入结果的防重复保护。
+- ego Lite 真实页面核实：主页发帖弹窗自动聚焦 textarea，maxlength=5000；同一导航内存在隐藏的重复发帖按钮，使用排除 aria-hidden 的 XPath 定位。图片原生粘贴可保持同源 blob 预览，状态为 loaded；不以 CDN URL 作为唯一就绪条件，不将本地预览就绪声称为服务器上传完成。未自动选择分区或点击发布。
+- 独立构建目录 /tmp/inkpost-bonjour-build 编译通过；Bonjour 专项 4 tests / 2 suites 通过（57.228 秒），含 10 种正文/恢复场景、6 种图片检查场景，以及真实页面两张图片、带空白和空行正文的填写、重试清理与恢复校验。测试 Space 已结束，未发布帖子。
+- 当前未验证正式应用内从渠道选择到完成交接的完整点击链路，也未验证真实站点未登录流程；未安装或启动新版应用。
+- 回归执行覆盖 163 tests / 31 suites（272.445 秒），唯一失败为结果布局测试仍按原六渠道限定 600pt 高度；新增第七渠道产生一行 36pt 单元格及 8pt 间距，按实际渠道行数调整测试上限，未修改正式界面。最终 Bonjour、结果布局和素材取消专项 7 tests / 4 suites 全部通过（47.481 秒）。首次中止轮次未完成的素材取消测试，单独复验通过，不作为已确认挂起问题。差异检查通过；未声称最终版本一次完整全量运行全部通过。
+
+- 0.25.0 交付复核：全量串行回归通过（164 tests / 31 suites，274.217 秒）。正式签名、DMG、ZIP、版本与更新清单校验通过。

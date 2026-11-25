@@ -6,7 +6,6 @@ final class BonjourChannelAdapter: ChannelAdapter {
     // No verified account-independent ceiling; actual page acceptance is checked below.
     let capabilities = ChannelCapabilities(usesTitle: true, maximumImages: .max,
         entryURL: "https://bonjour.bio/", requiresTitle: false, maximumBodyCharacters: 5000)
-    private var retryResetNeeded = false
     private var confirmedImages: [String] = []
     private var pendingImage = false
     private var bodyPasteAttempted = false
@@ -34,7 +33,6 @@ final class BonjourChannelAdapter: ChannelAdapter {
 
     @MainActor
     private func prepare(request: ChannelRequest, context: ChannelExecutionContext) async throws -> ChannelOutcome {
-        if context.command == .retry { retryResetNeeded = true }
         try context.advance(.validatingRequest)
         try validate(request)
         let uploadPaths = try context.uploadPaths(for: request)
@@ -90,13 +88,14 @@ final class BonjourChannelAdapter: ChannelAdapter {
         let expected = expectedBody(for: request)
         try context.advance(.fillingContent)
         var initial = try await read(context.bridge)
-        if retryResetNeeded {
+        do {
+            context.diagnostic("清空 Bonjour 现有正文和图片，再填写本次任务内容")
             try context.advance(.fillingContent)
             // Use the site's explicit remove controls; never mutate editor state directly.
             _ = try await context.bridge.run("""
                 // bonjour:reset-editor
                 for (let index = 0; index < \(initial.images.count); index++) {
-                    await page.click('[data-community-post-composer-dialog] button[aria-label="删除配图 1"]', {label:'移除 Bonjour 重试图片'});
+                    await page.click('[data-community-post-composer-dialog] button[aria-label="删除配图 1"]', {label:'清空 Bonjour 现有图片'});
                     await page.waitForFunction(count => document.querySelectorAll('[data-community-post-composer-dialog] [data-community-media-slide]').length === count, \(initial.images.count) - index - 1, {timeout:10000});
                 }
                 await page.fill('\(Self.editor)', '');
@@ -105,9 +104,11 @@ final class BonjourChannelAdapter: ChannelAdapter {
             initial = try await read(context.bridge)
             guard initial.body.isEmpty, initial.images.isEmpty else {
                 throw ChannelFailure(code: .verificationFailed, stage: .fillingContent,
-                    detail: "重试页面未清空，已停止填写", recovery: .inspectionRequired)
+                    detail: "页面未清空，已停止填写", recovery: .inspectionRequired)
             }
-            retryResetNeeded = false
+            confirmedImages = []
+            pendingImage = false
+            bodyPasteAttempted = false
         }
         try check(initial, expected: expected, allowEmpty: true, stage: .fillingContent)
         try validateImages(initial.images)

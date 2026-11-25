@@ -4,11 +4,11 @@ import Foundation
 final class XChannelAdapter: ChannelAdapter {
     let platform: PlatformID = .x
     let capabilities = ChannelCapabilities(usesTitle: false, maximumImages: 4,
-        entryURL: "https://x.com/compose/post", requiresTitle: false, maximumBodyCharacters: 1899)
-    private var retryResetNeeded = false
+        entryURL: "https://x.com/home", requiresTitle: false, maximumBodyCharacters: 1899)
     private var confirmedImages: [String] = []
     private var pendingImage = false
-    private static let editor = "[role=\"dialog\"] [data-testid=\"tweetTextarea_0\"][contenteditable=\"true\"]"
+    private static let editor = "[role=\"dialog\"] textarea"
+    private static let attachments = "[role=\"dialog\"] [data-media-tile]"
 
     func expectedBody(for request: ChannelRequest) -> String {
         (request.title.isEmpty ? "" : request.title + "\n") + request.body
@@ -24,7 +24,6 @@ final class XChannelAdapter: ChannelAdapter {
 
     @MainActor
     func execute(request: ChannelRequest, context: ChannelExecutionContext) async throws -> ChannelOutcome {
-        if context.command == .retry { retryResetNeeded = true }
         try context.advance(.validatingRequest)
         try validate(request)
         let uploadPaths = try context.uploadPaths(for: request)
@@ -32,9 +31,9 @@ final class XChannelAdapter: ChannelAdapter {
         let raw = try await context.bridge.run("""
             // x:open-editor
             const current = await page.url();
-            if (current !== 'https://x.com/compose/post') await page.goto('https://x.com/compose/post');
+            if (current !== 'https://x.com/compose/post' && current !== 'https://x.com/home') await page.goto('https://x.com/home');
             await page.waitForFunction(() => location.pathname.includes('/login') || location.pathname.includes('/flow/') ||
-                !!document.querySelector('\(Self.editor)'), undefined, {timeout:20000});
+                !!document.querySelector('\(Self.editor)') || !!document.querySelector('a[href="/compose/post"]'), undefined, {timeout:20000});
             const loginRequired = await page.evaluate(() => location.pathname.includes('/login') || location.pathname.includes('/flow/'));
             cliLog(JSON.stringify({ok:true,loginRequired}));
             """)
@@ -44,18 +43,39 @@ final class XChannelAdapter: ChannelAdapter {
             return .waitingForUser(.init(code: .loginRequired, stage: .checkingLogin,
                 detail: "请登录 X 后继续此渠道", recovery: .loginRequired))
         }
+        try context.advance(.openingEditor)
+        _ = try await context.bridge.run("""
+            // x:open-compose
+            const existing = await page.evaluate(() => document.querySelectorAll('\(Self.editor)').length);
+            if (existing === 0) {
+                await page.click('a[href="/compose/post"]', {label:'打开 X 发帖窗口'});
+            }
+            await page.waitForFunction(() => {
+                const editors = document.querySelectorAll('\(Self.editor)');
+                return editors.length === 1 && editors[0].checkVisibility();
+            }, undefined, {timeout:10000});
+            cliLog(JSON.stringify({ok:true}));
+            """)
         let expected = expectedBody(for: request)
         var initial = try await read(context.bridge)
-        if retryResetNeeded {
+        do {
             try context.advance(.fillingContent)
-            try await RetryEditorReset.clear(context.bridge, editor: Self.editor,
-                attachments: "[role=\"dialog\"] [data-testid=\"attachments\"] img", count: initial.images.count)
+            _ = try await context.bridge.run("""
+                // x:clear-editor
+                for (let index = 0; index < \(initial.images.count); index++) {
+                    await page.click('\(Self.attachments) button[data-remove-media] >> nth=0', {label:'清空 X 原有图片'});
+                    await page.waitForFunction(count => document.querySelectorAll('\(Self.attachments)').length === count,
+                        \(initial.images.count) - index - 1, {timeout:10000});
+                }
+                await page.fill('\(Self.editor)', '');
+                cliLog(JSON.stringify({ok:true}));
+                """)
             initial = try await read(context.bridge)
             guard initial.body.isEmpty, initial.images.isEmpty else {
                 throw ChannelFailure(code: .verificationFailed, stage: .fillingContent,
-                    detail: "重试页面未清空，已停止填写", recovery: .inspectionRequired)
+                    detail: "页面未清空，已停止填写", recovery: .inspectionRequired)
             }
-            retryResetNeeded = false
+            confirmedImages = []; pendingImage = false
         }
         try check(initial, expected: expected, allowEmpty: true)
         try validateImages(initial.images)
@@ -161,19 +181,26 @@ final class XChannelAdapter: ChannelAdapter {
         """
     private static let readSource = """
         if (location.origin !== 'https://x.com' || location.pathname !== '/compose/post') throw new Error('X 已离开撰写页面');
-        const editor = document.querySelector('\(editor)');
-        if (!editor || !editor.getBoundingClientRect().width) throw new Error('X 正文框不可操作');
+        const editors = document.querySelectorAll('\(editor)');
+        const editor = editors[0];
+        if (editors.length !== 1 || !editor.checkVisibility()) throw new Error('X 正文框不可操作或不唯一');
         const root = editor.closest('[role="dialog"]');
-        const blocks = [...editor.querySelectorAll('[data-block="true"]')];
-        if (!blocks.length) throw new Error('X 正文结构变化，无法验证');
-        const images = [...root.querySelectorAll('[data-testid="attachments"] img')].map(img => ({
-            identity:img.src, ready:img.complete && img.naturalWidth > 0
-        }));
-        const visible = el => el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0;
-        const busy = [...root.querySelectorAll('[data-testid="attachments"] [role="progressbar"], [role="progressbar"][aria-label]')].some(visible) ||
-            [...root.querySelectorAll('[data-testid="progressBar-bar"]')].some(el => parseFloat(el.style.width) > 0 && parseFloat(el.style.width) < 100);
-        const rejected = [...root.querySelectorAll('[role="alert"]')].some(el => visible(el) && el.textContent.length > 0);
-        return {body:blocks.map(b => b.textContent).join('\\n'),images,busy,rejected,
-            accepted:root.querySelector('[data-testid="tweetButton"]')?.disabled === false};
+        const visible = el => el.checkVisibility({checkOpacity:true, checkVisibilityCSS:true});
+        const tiles = [...root.querySelectorAll('[data-media-tile]')];
+        const images = tiles.map(tile => {
+            const imgs = tile.querySelectorAll('img');
+            if (imgs.length !== 1 || tile.querySelector('video') || tile.querySelectorAll('button[data-remove-media]').length !== 1)
+                throw new Error('X 附件结构变化或存在非图片附件');
+            const img = imgs[0];
+            return {identity:tile.getAttribute('data-media-tile') + '|' + img.src,
+                ready:img.complete && img.naturalWidth > 0};
+        });
+        const buttons = [...root.querySelectorAll('form button')].filter(button => visible(button) && /^(发帖|Post)$/.test(button.textContent.trim()));
+        if (buttons.length !== 1) throw new Error('X 发帖按钮不可唯一确认');
+        const busy = [...root.querySelectorAll('[role="progressbar"], [aria-busy="true"]')].some(visible);
+        const rejected = [...root.querySelectorAll('[role="alert"]')].some(el => visible(el) && el.textContent.length > 0) ||
+            tiles.some(tile => [...tile.querySelectorAll('button[aria-label]')].some(button => visible(button) && /^(重试|Retry) /.test(button.getAttribute('aria-label'))));
+        return {body:editor.value, images, busy, rejected,
+            accepted:!buttons[0].disabled && buttons[0].getAttribute('aria-disabled') !== 'true' && editor.validity.valid};
         """
 }

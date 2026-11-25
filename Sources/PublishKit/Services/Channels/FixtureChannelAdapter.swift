@@ -5,7 +5,6 @@ final class FixtureChannelAdapter: ChannelAdapter {
     let platform: PlatformID = .simFixture
     let capabilities = ChannelCapabilities(usesTitle: true, maximumImages: 6, isArticle: true, requiresTitle: true)
     private var opened = false
-    private var uploadStarted = false
 
     func validate(_ request: ChannelRequest) throws {
         if capabilities.requiresTitle && request.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -34,21 +33,22 @@ final class FixtureChannelAdapter: ChannelAdapter {
             opened = true
         }
         try context.advance(.fillingContent)
-        // Preserve an existing matching field; conflicts require inspection, never overwrite.
-        for (target, expected) in [("#title", request.title), ("#editor", request.body)] {
-            let current = try await DraftVerifier.read(bridge: bridge, target: target)["text"] as? String ?? ""
-            guard current.isEmpty || current == expected else {
+        _ = try await bridge.fill(target: "#title", text: "")
+        _ = try await bridge.fill(target: "#editor", text: "")
+        _ = try await bridge.upload(target: "#files", paths: [])
+        for target in ["#title", "#editor", "#files"] {
+            let state = try await DraftVerifier.read(bridge: bridge, target: target)
+            let empty = target == "#files" ? (state["files"] as? Int == 0) : (state["text"] as? String == "")
+            guard empty else {
                 throw ChannelFailure(code: .verificationFailed, stage: .fillingContent,
-                    detail: "模拟页面已有不同内容：\(target)", recovery: .inspectionRequired)
+                    detail: "模拟页面未清空：\(target)", recovery: .inspectionRequired)
             }
-            if current != expected { _ = try await bridge.fill(target: target, text: expected) }
         }
+        _ = try await bridge.fill(target: "#title", text: request.title)
+        _ = try await bridge.fill(target: "#editor", text: request.body)
         if !request.assets.isEmpty {
             try context.advance(.uploadingAssets)
-            if !uploadStarted {
-                uploadStarted = true
-                _ = try await bridge.upload(target: "#files", paths: uploadPaths)
-            }
+            _ = try await bridge.upload(target: "#files", paths: uploadPaths)
         }
         try context.advance(.verifyingContent)
         try await DraftVerifier.verify(bridge: bridge, request: request)

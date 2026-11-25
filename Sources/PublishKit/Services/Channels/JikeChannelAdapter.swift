@@ -7,7 +7,6 @@ final class JikeChannelAdapter: ChannelAdapter {
     let capabilities = ChannelCapabilities(usesTitle: false, maximumImages: .max,
         entryURL: "https://web.okjike.com/following", requiresTitle: false)
     private static let editor = "form [data-lexical-editor=\"true\"][contenteditable=\"true\"]"
-    private var retryResetNeeded = false
     private var confirmed: [String] = []
     private var pending = false
     private var opened = false
@@ -22,7 +21,6 @@ final class JikeChannelAdapter: ChannelAdapter {
 
     @MainActor
     func execute(request: ChannelRequest, context: ChannelExecutionContext) async throws -> ChannelOutcome {
-        if context.command == .retry { retryResetNeeded = true }
         try context.advance(.validatingRequest)
         try validate(request)
         let uploadPaths = try context.uploadPaths(for: request)
@@ -51,16 +49,16 @@ final class JikeChannelAdapter: ChannelAdapter {
         }
         opened = true
         var initial = try await read(context.bridge)
-        if retryResetNeeded {
+        do {
             try context.advance(.fillingContent)
             try await RetryEditorReset.clear(context.bridge, editor: Self.editor,
                 attachments: "form [aria-roledescription=\"sortable\"]", count: initial.images.count)
             initial = try await read(context.bridge)
             guard initial.body.isEmpty, initial.images.isEmpty else {
                 throw ChannelFailure(code: .verificationFailed, stage: .fillingContent,
-                    detail: "重试页面未清空，已停止填写", recovery: .inspectionRequired)
+                    detail: "页面未清空，已停止填写", recovery: .inspectionRequired)
             }
-            retryResetNeeded = false
+            confirmed = []; pending = false
         }
         try check(initial, request: request, allowEmpty: true)
         try validateImages(initial.images)

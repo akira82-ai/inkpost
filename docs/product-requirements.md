@@ -43,6 +43,7 @@
 - Production dispatch passes a structured `ChannelRequest` to `DispatchServicing.execute`; never parse content or file paths from a goal prompt. Inject `DispatchServicing` to verify coordination without a browser or API key.
 - The main dispatch flow MUST pass the complete `ChannelRequest` to every selected channel adapter: title, full body, HTML and the complete image/asset list. Preserve all supplied fields, including fields a channel does not use; never omit, clear, truncate or merge them based on the destination channel. User-omitted fields remain empty rather than being fabricated.
 - Each channel adapter alone decides which supplied fields to use, ignore or transform for its platform, and owns the corresponding channel-specific verification. A channel ignoring a field does not authorize the main dispatch flow to remove it. Keep channel rules and channel-specific instructions out of the controller and main dispatch algorithm.
+- 所有适配器每次执行填写（新任务、重试、继续）时，均先清空目标编辑器原有标题（如有）、正文与全部附件；确认清空成功后重置本次填写检查点，再完整填写当前任务快照。清空失败则停止，不追加、不误报成功；不清理其他页面、账号或网站的全局存储。
 - `Services/Channels/` contains independent `ChannelAdapter` implementations registered through a task-scoped `ChannelRegistry`. Adapters own channel rules, input validation, platform instructions, execution steps, verification and channel recovery state. The dispatch service owns adapter invocation, task/session management, Space/Page allocation, command and snapshot validation, recovery coordination and common error conversion; it must not implement channel-specific steps.
 - `ChannelContract.swift` defines fixed commands (`prepare`, `resumeAfterUser`), stage/event codes, terminal outcomes (`readyForReview`, `waitingForUser`, `failed`) and structured failures (code, stage, detail, recovery, diagnostic ID). Branch on codes/recovery only, never presentation text or model prose. UI labels belong in Views.
 - Public-layer validation covers request structure, asset validity, task identity and command legality. Channel requirements belong to adapters: whether a title is mandatory, whether image-only content is accepted, supported body formats, channel image limits. The main flow may read adapter-declared capabilities to show guidance, but must not infer that `usesTitle` means a title is mandatory or impose a nonempty-body rule on every adapter; the product editor independently requires non-whitespace body and at least one channel. An adapter validates its own requirements before browser writes and returns a structured outcome when they are unmet. Do not use `PlatformRules` to centralize channel policies.
@@ -92,6 +93,7 @@
 ## X channel
 
 - X uses a deterministic compose adapter without LLM configuration. Read [X adapter maintenance](../Sources/PublishKit/Services/Channels/XChannelAdapter.md) before changing it. Optional title is prepended to the first line; composed plain text is limited to 1899 user-visible characters by product decision, with at most four pasted images. Verify actual editor acceptance and stop before Post.
+- 从 X 主页点击 `/compose/post` 链接进入弹窗，定位弹窗内 textarea；每次清空正文和媒体卡片后原生粘贴，并校验文字、图片数量与顺序及发帖按钮可用状态，不自动发布。
 - Dispatch passes the title and body from the shared task snapshot after the common edge trim, preserving explicit HTML and ordered source assets in ChannelRequest. Dispatch does not generate HTML. Task-prepared PNG mappings stay separate from the request.
 
 ## Deterministic channel execution
@@ -105,7 +107,7 @@
 
 ## Juejin pins channel
 
-- Read [Juejin adapter maintenance](../Sources/PublishKit/Services/Channels/JuejinChannelAdapter.md) before changing it. Ordinary pins only; title is optionally prepended with one newline, composed text at most 1000 UTF-16 units. First filling clears old body/attachments as authorized; resume must never clear again. Preserve the received task input after the common edge trim; the website itself trims edge whitespace on submission. Attachments are staged locally and uploaded only by the user’s final Publish action; verify all staged images without claiming remote upload.
+- Read [Juejin adapter maintenance](../Sources/PublishKit/Services/Channels/JuejinChannelAdapter.md) before changing it. Ordinary pins only; title is optionally prepended with one newline, composed text at most 1000 UTF-16 units. Every execution clears old body/attachments and link cards before filling the complete task snapshot. Preserve the received task input after the common edge trim; the website itself trims edge whitespace on submission. Attachments are staged locally and uploaded only by the user’s final Publish action; verify all staged images without claiming remote upload.
 
 ## 异常结果展示与导航（#47，历史方案）
 
@@ -130,7 +132,7 @@
 ## B站普通图文动态（#29）
 
 - 入口为 `https://t.bilibili.com/`；标题选填、正文必填、图片选填。标题与正文分别先点击对应输入元素获得焦点，再粘贴并回读核对，停在发布按钮前，用户手工发布。
-- 首次填写前清空 B站编辑区原有标题、正文和图片，确认清空后再填写。恢复时不重复清空或粘贴，复用原 Page 和有序图片检查点；公共分发不增加 B站专属分支。
+- 每次填写前清空 B站编辑区原有标题、正文和图片，确认清空后完整填写；继续与重试同样先清空，成功后重置图片检查点，复用原任务输入；公共分发不增加 B站专属分支。
 - 平台正文须与适配器收到的任务输入一致（公共层已统一去除整段首尾空白）；若平台另行改动内容，明确要求用户检查，不静默改写或报告填写成功。具体页面规则和验收边界见 [B站适配器维护](../Sources/PublishKit/Services/Channels/BilibiliChannelAdapter.md)。
 
 ## 当前空间打开渠道（#52，取代每任务新建 Space）
@@ -168,4 +170,4 @@
 
 - 独立适配器实现 ChannelAdapter，通过现有注册表接入；公共分发、素材准备、剪贴板保护及窗口行为不增加渠道专属分支。
 - 从 https://bonjour.bio/ 主页点击「发帖」，确认编辑器及焦点后粘贴正文和按顺序准备的 PNG。可选标题置于正文首行，非空标题后加一个换行；组合文字不超过页面的 5000 UTF-16 单位限制。
-- 不自动选择分区、不点击最终发布；正文与附件回读核对后交由用户检查、选择分区并手工发布。已有不同草稿、页面变化或不明确的粘贴结果保留现场并报告；沿用公共登录恢复、重试和取消机制。
+- 不自动选择分区、不点击最终发布；正文与附件回读核对后交由用户检查、选择分区并手工发布。每次执行填写（包括新任务、重试、继续）均先清空现有正文和图片，确认清空后完整填写本次任务内容；清空失败时停止。页面变化或不明确的粘贴结果报告并交由用户处理；沿用公共登录恢复、重试和取消机制。

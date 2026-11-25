@@ -76,7 +76,7 @@ struct WeiboChannelAdapterTests {
                 do { _ = try await execute(command); Issue.record("Uncertain body write accepted") }
                 catch { #expect((error as? ChannelFailure)?.recovery == .inspectionRequired) }
             }
-            #expect(try String(contentsOf: log).components(separatedBy: "weibo:paste-body").count - 1 == 1)
+            #expect(try String(contentsOf: log).components(separatedBy: "weibo:paste-body").count - 1 == 2)
         } else if ["conflict", "rejected"].contains(mode) {
             do { _ = try await execute(.prepare); Issue.record("Invalid content accepted") }
             catch {
@@ -84,7 +84,7 @@ struct WeiboChannelAdapterTests {
                 #expect(failure.stage == .fillingContent)
                 if mode == "conflict" {
                     #expect(failure.recovery == .inspectionRequired)
-                    #expect(failure.detail.contains("已有不同的草稿"))
+                    #expect(failure.detail.contains("页面未清空"))
                 }
             }
             #expect(!(try String(contentsOf: log)).contains("weibo:paste-body"))
@@ -101,8 +101,9 @@ struct WeiboChannelAdapterTests {
                 }
             } else { _ = try await execute(.resumeAfterUser) }
             let scripts = try String(contentsOf: log)
-            if mode.hasPrefix("retry") { #expect(scripts.components(separatedBy: "retry:clear-editor").count - 1 == 1) }
-            #expect(scripts.components(separatedBy: "weibo:paste-body").count - 1 == 1)
+            let executions = mode == "closedPanel" ? 1 : 2
+            #expect(scripts.components(separatedBy: "retry:clear-editor").count - 1 == executions)
+            #expect(scripts.components(separatedBy: "weibo:paste-body").count - 1 == executions)
             #expect(scripts.components(separatedBy: "weibo:open-quick-publish").count - 1 == 1)
             #expect(scripts.contains(".woo-modal-main .wbpro-layer textarea"))
             #expect(scripts.contains("document.activeElement === editors[0]"))
@@ -156,6 +157,7 @@ struct WeiboImageTests {
         result={'ok':True}
         if 'weibo:open-editor' in script:result['loginRequired']=False
         if 'weibo:check-quick-publish' in script:result['present']=True
+        if 'retry:clear-editor' in script:state['body']='';state['images']=[];state['reverse']=False
         if 'weibo:paste-body' in script:state['body']='unused\\nBody'
         if 'weibo:paste-image' in script:
             state['uploads']+=1
@@ -185,8 +187,7 @@ struct WeiboImageTests {
                 if mode == "deleted" { state["images"] = [] }
                 if mode == "replaced" { state["images"] = [["identity": "replacement", "ready": true], ["identity": "2", "ready": true]] }
                 try JSONSerialization.data(withJSONObject: state).write(to: path)
-                do { _ = try await run(.resumeAfterUser); Issue.record("Changed images accepted") }
-                catch { #expect((error as? ChannelFailure)?.recovery == .inspectionRequired) }
+                #expect(try await run(.resumeAfterUser).failure == nil)
             } else { #expect(try await run(.resumeAfterUser).failure == nil) }
         } else {
             do { _ = try await run(.prepare); Issue.record("Upload failure swallowed") }
@@ -195,7 +196,7 @@ struct WeiboImageTests {
             catch { #expect((error as? ChannelFailure)?.recovery == .inspectionRequired) }
         }
         let log = try String(contentsOf: directory.appendingPathComponent("log"))
-        #expect(log.components(separatedBy: "weibo:paste-image").count - 1 == (["valid","reordered","deleted","replaced"].contains(mode) ? 2 : 1))
+        #expect(log.components(separatedBy: "weibo:paste-image").count - 1 == (["valid","reordered","deleted","replaced"].contains(mode) ? 4 : 2))
         #expect(!log.contains("page.reload"))
         #expect(try Data(contentsOf: original) == sourceBytes)
         #expect(prepared.assets.allSatisfy { $0.pngPath.hasSuffix(".png") && $0.pngPath != original.path })

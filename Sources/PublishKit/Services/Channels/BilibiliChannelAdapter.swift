@@ -8,8 +8,6 @@ final class BilibiliChannelAdapter: ChannelAdapter {
     private static let editor = ".bili-dyn-publishing .bili-rich-textarea__inner[contenteditable=\"true\"]"
     private static let title = ".bili-dyn-publishing__title__input"
     private var opened = false
-    private var clearingAttempted = false
-    private var cleared = false
     private var titleAttempted = false
     private var bodyAttempted = false
     private var confirmed: [String] = []
@@ -62,9 +60,7 @@ final class BilibiliChannelAdapter: ChannelAdapter {
         opened = true
         try context.advance(.fillingContent)
         let initial: State
-        if !cleared {
-            guard !clearingAttempted else { throw failure("B站上次清空结果未知，请检查原页面") }
-            clearingAttempted = true
+        do {
             _ = try await context.bridge.run("""
                 // bilibili:clear-draft
                 const url = new URL(await page.url());
@@ -87,9 +83,8 @@ final class BilibiliChannelAdapter: ChannelAdapter {
             guard initial.title.isEmpty, initial.body.isEmpty, initial.images.isEmpty else {
                 throw failure("B站旧标题、正文或图片未清空，已停止填写")
             }
-            cleared = true
-        } else {
-            initial = try await read(context.bridge)
+            titleAttempted = false; bodyAttempted = false
+            confirmed = []; pendingImage = false
         }
         try check(initial, request: request, allowEmpty: true)
         try validateImages(initial.images)

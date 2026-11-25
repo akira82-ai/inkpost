@@ -6,7 +6,6 @@ final class ZhihuChannelAdapter: ChannelAdapter {
     let capabilities = ChannelCapabilities(usesTitle: true, maximumImages: 6, entryURL: "https://www.zhihu.com/", requiresTitle: false, maximumTitleCharacters: 44, maximumBodyCharacters: 1899)
     private static let titleTarget = "textarea[name=\"title\"]"
     private static let bodyTarget = "[contenteditable=\"true\"]"
-    private var retryResetNeeded = false
     private var images = ImageProgress()
 
     func validate(_ request: ChannelRequest) throws {
@@ -30,7 +29,6 @@ final class ZhihuChannelAdapter: ChannelAdapter {
 
     @MainActor
     func execute(request: ChannelRequest, context: ChannelExecutionContext) async throws -> ChannelOutcome {
-        if context.command == .retry { retryResetNeeded = true }
         try context.advance(.validatingRequest)
         try validate(request)
         let uploadPaths = try context.uploadPaths(for: request)
@@ -46,18 +44,18 @@ final class ZhihuChannelAdapter: ChannelAdapter {
         guard navigation.composerReady == true else { throw failure(.editorUnavailable, .openingEditor, "知乎想法编辑器尚未展开") }
         context.diagnostic("想法编辑器已展开")
 
-        // Inspect all existing content before the first write; preserve conflicting user content.
+        // Clear the target composer before every execution, then verify it is empty.
         var initial = try await readPage(context.bridge)
-        if retryResetNeeded {
+        do {
             try context.advance(.fillingContent)
             try await RetryEditorReset.clear(context.bridge, editor: Self.bodyTarget,
                 attachments: ".InputLike .ImageArea .DraggableTags-tag:not(.DraggableTags-undraggable)", count: initial.images.count, title: Self.titleTarget)
             initial = try await readPage(context.bridge)
             guard initial.title.isEmpty, initial.body.isEmpty, initial.images.isEmpty else {
                 throw ChannelFailure(code: .verificationFailed, stage: .fillingContent,
-                    detail: "重试页面未清空，已停止填写", recovery: .inspectionRequired)
+                    detail: "页面未清空，已停止填写", recovery: .inspectionRequired)
             }
-            retryResetNeeded = false
+            images = ImageProgress()
         }
         try initial.checkContent(request, allowEmpty: true)
         try images.validate(initial.images)

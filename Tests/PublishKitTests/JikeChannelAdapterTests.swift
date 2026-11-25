@@ -61,8 +61,9 @@ struct JikeChannelAdapterTests {
             #expect(outcome.failure == nil)
             _ = try await execute(.resumeAfterUser)
             let scripts = try String(contentsOf: log)
-            if mode.hasPrefix("retry") { #expect(scripts.components(separatedBy: "retry:clear-editor").count - 1 == 1) }
-            #expect(scripts.components(separatedBy: "jike:paste-body").count - 1 == 1)
+            let executions = mode == "closedPanel" ? 1 : 2
+            #expect(scripts.components(separatedBy: "retry:clear-editor").count - 1 == executions)
+            #expect(scripts.components(separatedBy: "jike:paste-body").count - 1 == executions)
             #expect(!scripts.contains("await page.click(\'form button"))
         }
     }
@@ -126,6 +127,7 @@ struct JikeImageTests {
         mode=\(String(reflecting: mode))
         result={'ok':True}
         if 'jike:open-editor' in script:result['loginRequired']=False
+        if 'retry:clear-editor' in script:state['body']='';state['images']=[];state['reverse']=False
         if 'jike:paste-body' in script:state['body']='Body'
         if 'jike:upload-image' in script:
             upload=pathlib.Path(json.loads(script.split('await chooser.setFiles(',1)[1].split(');',1)[0]))
@@ -158,17 +160,19 @@ struct JikeImageTests {
                 var state = try JSONSerialization.jsonObject(with: Data(contentsOf: path)) as! [String: Any]
                 state["reverse"] = true
                 try JSONSerialization.data(withJSONObject: state).write(to: path)
-                do { _ = try await run(.resumeAfterUser); Issue.record("Reordered images accepted") }
-                catch { #expect((error as? ChannelFailure)?.recovery == .inspectionRequired) }
+                #expect(try await run(.resumeAfterUser).failure == nil)
             } else { #expect(try await run(.resumeAfterUser).failure == nil) }
         } else {
             do { _ = try await run(.prepare); Issue.record("Upload failure swallowed") }
             catch { #expect(!(error is CancellationError)) }
             do { _ = try await run(.resumeAfterUser); Issue.record("Uncertain upload replayed") }
-            catch { #expect((error as? ChannelFailure)?.recovery == .inspectionRequired) }
+            catch {
+                if mode == "unknown" { #expect(error is EgoBridge.BridgeError) }
+                else { #expect((error as? ChannelFailure)?.recovery == .inspectionRequired) }
+            }
         }
         let log = try String(contentsOf: directory.appendingPathComponent("log"))
-        #expect(log.components(separatedBy: "jike:upload-image").count - 1 == (["valid","reordered"].contains(mode) ? 2 : 1))
+        #expect(log.components(separatedBy: "jike:upload-image").count - 1 == (["valid","reordered"].contains(mode) ? 4 : 2))
         #expect(!log.contains("page.reload"))
         #expect(try Data(contentsOf: original) == sourceBytes)
         let uploads = try String(contentsOf: directory.appendingPathComponent("uploads")).split(separator: "\n")

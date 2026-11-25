@@ -22,7 +22,7 @@
 核对 img.complete、naturalWidth、远程地址、无 spinner，按 DOM 顺序记录 origin/path（不留签名查询串）。
 不用全页面 img 计数，避免头像、声明图标及推荐流干扰。
 首页会自动恢复草稿，但它不是操作目标，快捷发布与首页的同名 textarea 必须分开定位。
-快捷发布如已有不同正文或未知附件，保留并提示检查，不自动清空；已观察到空白打开，不将“每次必为空”作为假设。
+每次填写先清空快捷发布中的现有正文和附件，回读确认清空成功后完整填写；不将“每次必为空”作为假设。
 验证结束清理本次创建的测试正文与图片，避免留下测试草稿。
 这些 CSS 模块名前缀来自实测；结构不匹配时停止报错，不能猜测另一个入口或写 DOM 内部状态。
 
@@ -30,9 +30,9 @@
 
 同一任务复用适配器、Page、原始请求及 prepared PNG。登录入口或可见登录按钮且编辑器缺失时返回 loginRequired。
 首次记录面板打开尝试后才执行点击；结果不明时不盲目重放打开动作。
-恢复不刷新，不重开面板，不覆盖已存在的其他正文，不重新粘贴已确认附件。面板关闭或不唯一返回 editorUnavailable / inspectionRequired。
-粘贴前记录 pending；上传超时后仅等待原附件，无法确认粘贴结果时转 inspectionRequired，不盲目重放。
-附件删除、替换、重排或额外添加均停止，保留页面。正文粘贴结果不明且框为空时也不自动重复。
+恢复不刷新、不重开面板；先清空正文和附件，确认成功后重置旧检查点并完整填写。面板关闭或不唯一返回 editorUnavailable / inspectionRequired。
+粘贴前记录 pending；无法确认结果时停止本次执行，不在同次执行中盲目重放。下次执行同样先清空后重填。
+执行期间附件删除、替换、重排或额外添加均停止并保留现场。
 取消沿共享执行器传播；已完成的页面操作不回滚。任务身份、重复命令和变更快照由通用协调层拒绝。
 
 ## 验证与边界
@@ -45,4 +45,4 @@
 
 Text paste uses `ClipboardPasteService.withTextPaste(text)` to write plain text and `org.nspasteboard.TransientType` in one pasteboard item, followed by native `Meta+V`. Do not call `keyboard.paste(text)` here: that would rewrite the marked clipboard. PNG clipboard uploads share the same marker and lease. Restore only while the app owns the pasteboard change count; never overwrite a newer user copy. This remains native paste, not direct DOM editing. Channel-specific live compatibility after this change still requires verification.
 
-- #65：单渠道重试使用新页面及新适配器状态。定位编辑器后先清空旧标题（若支持）、正文及附件，确认清空成功后再填写原任务稿件；清空失败停止，不追加。登录后继续仍执行尚未完成的清空步骤。此路径的真实网站附件删除控件兼容性需实测，不能用本地替身通过代替真实验收。
+- Every execution (prepare, retry, and resume) must clear the target title (when present), body, and all attachments before filling the complete current task snapshot. Verify empty fields and zero attachments first; only then reset paste/upload checkpoints. A failed clear stops before any new paste. Reuse the existing native clear implementation; never click final Publish.

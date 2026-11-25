@@ -339,7 +339,7 @@ struct ZhihuAdapterTests {
             #expect(result.failure?.code == .verificationFailed)
             #expect(result.failure?.recovery == .inspectionRequired)
         }
-        if mode == "bodyConflict" { #expect(!scriptLog.contains("await page.fill")) }
+        if mode == "bodyConflict" { #expect(!scriptLog.contains("zhihu:paste-body")) }
         #expect(!scriptLog.contains("Escape"))
         #expect(!scriptLog.contains("keyboard.paste(")) // text must not rewrite the marked clipboard
     }
@@ -402,17 +402,20 @@ struct ZhihuAdapterTests {
         script=sys.stdin.read()
         with (root/'scripts.log').open('a') as log: log.write(script+'\\n')
         statefile=root/'state.json'
-        state=json.loads(statefile.read_text()) if statefile.exists() else {'title':'','opens':0}
+        state=json.loads(statefile.read_text()) if statefile.exists() else {'title':'','body':'old draft','opens':0}
         expected=json.loads(\(String(reflecting: json)))
         mode=\(String(reflecting: mode))
         result={'ok':True}
         if 'zhihu:open-editor' in script:
             state['opens']+=1
             result.update({'loginRequired':True} if mode=='login' and state['opens']==1 else {'composerReady':True})
+        elif 'retry:clear-editor' in script:
+            state['title']='';state['body']=''
+        elif 'zhihu:paste-body' in script:state['body']=expected['body']
         elif 'await page.fill' in script:
             state['title']=expected['title'] if mode!='titleRejected' else 'truncated'
         elif 'zhihu:read-page' in script:
-            result['value']={'title':state['title'],'body':expected['body'] if mode!='bodyConflict' else 'other content',
+            result['value']={'title':state['title'],'body':state['body'] if mode!='bodyConflict' else 'other content',
                 'titleLimit':None,'titleValid':True,'images':[]}
         statefile.write_text(json.dumps(state))
         print(json.dumps(result))
@@ -445,7 +448,7 @@ struct DeterministicFixtureTests {
             key,value=map(json.loads,match.groups())
             if defect=='writeFailure': result={'ok':False,'error':'write result unknown'}
             else: state[key]=value
-        if 'await page.setInputFiles' in script: state['#files']=0 if defect=='images' else 1
+        if 'await page.setInputFiles' in script: state['#files']=0 if '[], ' in script or ', []' in script or defect=='images' else 1
         if 'const el = document.querySelector' in script:
             key=next(k for k in state if k in script)
             value=state[key]

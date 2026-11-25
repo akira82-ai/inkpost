@@ -11,7 +11,7 @@
 - Logged-in composer: `.bili-dyn-publishing`, title `.bili-dyn-publishing__title__input`, body `.bili-rich-textarea__inner[contenteditable="true"]`. Click each field before native keyboard.press('Meta+V'); do not assign DOM/framework state.
 - Empty editor contains exactly U+200B and LF with the `empty` class. Plain paste produces U+200B + text + SPACE + LF. Read only text nodes and remove exactly these observed editor sentinels, never trim user content. Unknown structures fail verification rather than silently flattening mentions or other rich tokens.
 - Plain multiline text, empty paragraphs and emoji were verified. Bilibili itself trims edge whitespace during paste. This adapter reports a mismatch and preserves the page if raw input cannot be verified; it does not claim arbitrary whitespace survives. Final publication was never invoked or verified.
-- Clear existing title, body and images once before the first fill. Read back all three to confirm they are empty. A failed or uncertain clear stops filling; resume never clears again. Uncertain pastes are not replayed.
+- Clear existing title, body and images before every execution, including resume. Read back all three to confirm they are empty before resetting checkpoints and filling the complete request. A failed or uncertain clear stops filling.
 - First upload uses `.bili-dyn-publishing__tools__item.pic` if the upload area is collapsed. Once expanded, use `.bili-pics-uploader__add`. The toolbar icon toggles the area; clicking it again can hide it instead of opening a chooser. Observe visibility first, arm waitForFileChooser before clicking, and add one prepared PNG at a time.
 - Attachments: `.bili-pics-uploader__item.success`, preview `.bili-pics-uploader-item-preview__pic` CSS background with data image URL; the preview's `msg` attribute reports errors. Decode each image and hash its stable data URL with dimensions for ordered recovery checkpoints. Success class and decoded preview are both required; do not infer successful upload from a dispatched chooser action.
 - Two distinct 64×64 pure-color PNGs were successfully added in order. Never use user/account screenshots as disposable upload fixtures. Initial batch chooser and incremental additions were both exercised; six-image and maximum-size limits are unverified.
@@ -29,4 +29,4 @@ Text paste uses `ClipboardPasteService.withTextPaste(text)` to write plain text 
 
 
 
-- #65：单渠道重试使用新页面及新适配器状态。定位编辑器后先清空旧标题（若支持）、正文及附件，确认清空成功后再填写原任务稿件；清空失败停止，不追加。登录后继续仍执行尚未完成的清空步骤。此路径的真实网站附件删除控件兼容性需实测，不能用本地替身通过代替真实验收。
+- Every execution (prepare, retry, and resume) must clear the target title (when present), body, and all attachments before filling the complete current task snapshot. Verify empty fields and zero attachments first; only then reset paste/upload checkpoints. A failed clear stops before any new paste. Reuse the existing native clear implementation; never click final Publish.

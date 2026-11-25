@@ -23,7 +23,7 @@ struct BonjourChannelAdapterTests {
         #expect(throws: ChannelFailure.self) { try adapter.validate(.init(title: "", body: String(repeating: "🧪", count: 2501))) }
     }
 
-    @Test(arguments: ["retry", "retryLogin", "resetFailed", "valid", "login", "conflict", "rejected", "cancel", "unknownBody", "closedPanel"])
+    @Test(arguments: ["retry", "retryLogin", "resetFailed", "valid", "login", "conflict", "rejected", "cancel", "unknownBody", "closedPanel", "testDraft"])
     func realAdapterUsesNativePasteAndChecksResult(_ mode: String) async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -33,23 +33,23 @@ struct BonjourChannelAdapterTests {
         let expected = BonjourChannelAdapter().expectedBody(for: request)
         let source = """
         #!/usr/bin/python3
-        import json,sys,pathlib
+        import json,sys,pathlib,subprocess
         root=pathlib.Path(__file__).parent
         script=sys.stdin.read()
         with (root/'log').open('a') as f:f.write(script+'\\n')
         path=root/'state'
         mode=\(String(reflecting: mode))
-        state=json.loads(path.read_text()) if path.exists() else {'body':'old draft' if mode in ['retry','retryLogin','resetFailed'] else '','opens':0}
+        state=json.loads(path.read_text()) if path.exists() else {'body':'old draft' if mode in ['retry','retryLogin','resetFailed','testDraft'] else '','images':([{'identity':'blob:test-blue','ready':True},{'identity':'blob:test-orange','ready':True}] if mode=='testDraft' else []),'opens':0}
         result={'ok':True}
         if 'bonjour:open-editor' in script:
             state['opens']+=1
             result['loginRequired']=mode in ['login','retryLogin'] and state['opens']==1
         if 'bonjour:check-quick-publish' in script:result['present']=not(mode=='closedPanel' and state['opens']>1)
-        if 'bonjour:reset-editor' in script and mode!='resetFailed':state['body']=''
+        if 'bonjour:reset-editor' in script and mode!='resetFailed':state['body']='';state['images']=[]
         if 'bonjour:paste-body' in script:
             if mode=='unknownBody':result={'ok':False,'error':'paste result unknown'}
-            else:state['body']=\(String(reflecting: expected))
-        if 'bonjour:read-page' in script:result['value']={'body':'other' if mode=='conflict' else state['body'],'images':[],'busy':False,'rejected':mode=='rejected','accepted':True}
+            else:state['body']=subprocess.check_output(['/usr/bin/pbpaste']).decode('utf-8')
+        if 'bonjour:read-page' in script:result['value']={'body':'other' if mode=='conflict' else state['body'],'images':state['images'],'busy':False,'rejected':mode=='rejected','accepted':True}
         path.write_text(json.dumps(state))
         print(json.dumps(result))
         """
@@ -57,10 +57,10 @@ struct BonjourChannelAdapterTests {
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: binary.path)
         let bridge = try EgoBridge(spaceName: "bonjour-stub", engine: EgoLiteEngine(binaryPath: binary.path))
         let adapter = BonjourChannelAdapter()
-        func execute(_ command: ChannelCommand) async throws -> ChannelOutcome {
+        func execute(_ command: ChannelCommand, input: ChannelRequest? = nil) async throws -> ChannelOutcome {
             let context = ChannelExecutionContext(execution: .init(taskID: UUID(), platform: .bonjour), command: command,
                 bridge: bridge, onEvent: { _ in })
-            return try await adapter.execute(request: request, context: context)
+            return try await adapter.execute(request: input ?? request, context: context)
         }
         if mode == "cancel" {
             let task = Task { try await execute(.prepare) }; task.cancel()
@@ -78,7 +78,7 @@ struct BonjourChannelAdapterTests {
                 do { _ = try await execute(command); Issue.record("Uncertain body write accepted") }
                 catch { #expect((error as? ChannelFailure)?.recovery == .inspectionRequired) }
             }
-            #expect(try String(contentsOf: log).components(separatedBy: "bonjour:paste-body").count - 1 == 1)
+            #expect(try String(contentsOf: log).components(separatedBy: "bonjour:paste-body").count - 1 == 2)
         } else if ["conflict", "rejected"].contains(mode) {
             do { _ = try await execute(.prepare); Issue.record("Invalid content accepted") }
             catch {
@@ -86,7 +86,7 @@ struct BonjourChannelAdapterTests {
                 #expect(failure.stage == .fillingContent)
                 if mode == "conflict" {
                     #expect(failure.recovery == .inspectionRequired)
-                    #expect(failure.detail.contains("已有不同的草稿"))
+                    #expect(failure.detail.contains("页面未清空"))
                 }
             }
             #expect(!(try String(contentsOf: log)).contains("bonjour:paste-body"))
@@ -103,8 +103,20 @@ struct BonjourChannelAdapterTests {
                 }
             } else { _ = try await execute(.resumeAfterUser) }
             let scripts = try String(contentsOf: log)
-            if mode.hasPrefix("retry") { #expect(scripts.components(separatedBy: "bonjour:reset-editor").count - 1 == 1) }
-            #expect(scripts.components(separatedBy: "bonjour:paste-body").count - 1 == 1)
+            let attempts = mode == "closedPanel" ? 1 : 2
+            #expect(scripts.components(separatedBy: "bonjour:reset-editor").count - 1 == attempts)
+            if mode == "testDraft" {
+                #expect(scripts.contains("index < 2"))
+                let state = try JSONSerialization.jsonObject(with: Data(contentsOf: dir.appendingPathComponent("state"))) as! [String: Any]
+                #expect(state["body"] as? String == expected)
+                #expect((state["images"] as? [Any])?.isEmpty == true)
+                let next = ChannelRequest(title: "下一次任务", body: "本次用户内容，不使用旧稿")
+                #expect(try await execute(.prepare, input: next).failure == nil)
+                let nextState = try JSONSerialization.jsonObject(with: Data(contentsOf: dir.appendingPathComponent("state"))) as! [String: Any]
+                #expect(nextState["body"] as? String == adapter.expectedBody(for: next))
+                #expect((nextState["images"] as? [Any])?.isEmpty == true)
+            }
+            #expect(scripts.components(separatedBy: "bonjour:paste-body").count - 1 == attempts)
             #expect(scripts.components(separatedBy: "bonjour:open-quick-publish").count - 1 == 1)
             #expect(scripts.contains("[data-community-post-composer-dialog] textarea"))
             #expect(scripts.contains("document.activeElement === editors[0]"))
@@ -114,31 +126,37 @@ struct BonjourChannelAdapterTests {
     }
 
     @Test(.enabled(if: ProcessInfo.processInfo.environment["INKPOST_BONJOUR_LIVE"] == "1"))
-    func liveBonjourComposeWithoutPublishing() async throws {
-        let adapter = BonjourChannelAdapter()
-        var paths: [String] = []
-        for index in 0..<2 {
-            let bitmap = try #require(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 80, pixelsHigh: 80, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
-            for y in 0..<80 { for x in 0..<80 { bitmap.setColor(index == 0 ? NSColor(deviceRed: 0.2, green: 0.4, blue: 0.9, alpha: 1) : NSColor(deviceRed: 0.9, green: 0.5, blue: 0.2, alpha: 1), atX: x, y: y) } }
-            let path = FileManager.default.temporaryDirectory.appendingPathComponent("bonjour-live-\(UUID().uuidString).png")
-            try #require(bitmap.representation(using: .png, properties: [:])).write(to: path); paths.append(path.path)
-        }
+    func liveBonjourEditorContractWithoutWriting() async throws {
+        // A real-account draft persists across Pages. Never fill or reset it in automated tests.
         let bridge = try EgoBridge(spaceName: try #require(ProcessInfo.processInfo.environment["INKPOST_BONJOUR_LIVE_SPACE"]), engine: EgoLiteEngine(), pageLabel: try #require(ProcessInfo.processInfo.environment["INKPOST_BONJOUR_LIVE_PAGE"]))
-        let request = ChannelRequest(title: "墨驿Bonjour适配器验证", body: "  保留空格🧪\n\n仅填写，不发布。  ", assets: paths)
-        let prepared = try AssetService.preparePNGAssets(request.assets)
-        for command in [ChannelCommand.retry, .resumeAfterUser] {
-            let context = ChannelExecutionContext(execution: .init(taskID: UUID(), platform: .bonjour), command: command, bridge: bridge, preparedAssets: prepared.assets,
-                onEvent: { _ in })
-            let outcome = try await adapter.execute(request: request, context: context)
-            #expect(outcome.failure == nil)
+        let result = try await bridge.run("""
+            const value = await page.evaluate(() => {
+                const roots = document.querySelectorAll('[data-community-post-composer-dialog]');
+                const root = roots[0];
+                const editors = root?.querySelectorAll('textarea[data-community-post-composer-input]');
+                return {
+                    uniqueEditor: roots.length === 1 && editors?.length === 1,
+                    maximumLength: editors?.[0]?.maxLength ?? -1,
+                    uniqueSubmit: root?.querySelectorAll('button[type="submit"][aria-label="发布"]').length === 1
+                };
+            });
+            cliLog(JSON.stringify({ok:true,value}));
+            """)
+        struct Result: Decodable {
+            struct Contract: Decodable { let uniqueEditor: Bool; let maximumLength: Int; let uniqueSubmit: Bool }
+            let value: Contract
         }
+        let contract = try JSONDecoder().decode(Result.self, from: Data(result.utf8)).value
+        #expect(contract.uniqueEditor)
+        #expect(contract.maximumLength == 5000)
+        #expect(contract.uniqueSubmit)
     }
 }
 
 @MainActor
 struct BonjourImageTests {
     @Test(arguments: ["valid", "unknown", "timeout", "reordered", "deleted", "replaced"])
-    func uploadCheckpointsPreventDuplicates(_ mode: String) async throws {
+    func eachExecutionClearsAttachmentsBeforeRefilling(_ mode: String) async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let binary = directory.appendingPathComponent("image-stub")
@@ -158,6 +176,7 @@ struct BonjourImageTests {
         result={'ok':True}
         if 'bonjour:open-editor' in script:result['loginRequired']=False
         if 'bonjour:check-quick-publish' in script:result['present']=True
+        if 'bonjour:reset-editor' in script:state['body']='';state['images']=[];state['reverse']=False
         if 'bonjour:paste-body' in script:state['body']='unused\\nBody'
         if 'bonjour:paste-image' in script:
             state['uploads']+=1
@@ -187,17 +206,23 @@ struct BonjourImageTests {
                 if mode == "deleted" { state["images"] = [] }
                 if mode == "replaced" { state["images"] = [["identity": "replacement", "ready": true], ["identity": "2", "ready": true]] }
                 try JSONSerialization.data(withJSONObject: state).write(to: path)
-                do { _ = try await run(.resumeAfterUser); Issue.record("Changed images accepted") }
-                catch { #expect((error as? ChannelFailure)?.recovery == .inspectionRequired) }
-            } else { #expect(try await run(.resumeAfterUser).failure == nil) }
+                #expect(try await run(.resumeAfterUser).failure == nil)
+                let refreshed = try JSONSerialization.jsonObject(with: Data(contentsOf: path)) as! [String: Any]
+                let images = refreshed["images"] as! [[String: Any]]
+                #expect(images.compactMap { $0["identity"] as? String } == ["3", "4"])
+            } else {
+                #expect(try await run(.resumeAfterUser).failure == nil)
+                #expect(try await run(.retry).failure == nil)
+                #expect(try await run(.resumeAfterUser).failure == nil)
+            }
         } else {
             do { _ = try await run(.prepare); Issue.record("Upload failure swallowed") }
             catch { #expect(!(error is CancellationError)) }
-            do { _ = try await run(.resumeAfterUser); Issue.record("Uncertain upload replayed") }
+            do { _ = try await run(.resumeAfterUser); Issue.record("Upload failure swallowed after reset") }
             catch { #expect((error as? ChannelFailure)?.recovery == .inspectionRequired) }
         }
         let log = try String(contentsOf: directory.appendingPathComponent("log"))
-        #expect(log.components(separatedBy: "bonjour:paste-image").count - 1 == (["valid","reordered","deleted","replaced"].contains(mode) ? 2 : 1))
+        #expect(log.components(separatedBy: "bonjour:paste-image").count - 1 == (mode == "valid" ? 8 : ["reordered","deleted","replaced"].contains(mode) ? 4 : 2))
         #expect(!log.contains("page.reload"))
         #expect(try Data(contentsOf: original) == sourceBytes)
         #expect(prepared.assets.allSatisfy { $0.pngPath.hasSuffix(".png") && $0.pngPath != original.path })

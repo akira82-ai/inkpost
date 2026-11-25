@@ -24,7 +24,7 @@ struct BilibiliChannelAdapterTests {
     }
 
     @Test(arguments: ["retryLoginDraft", "retryDraft", "valid", "login", "oldDraft", "clearFailed", "changedBody", "changedTitle", "unknownTitle", "unknownBody", "unknownImage", "timeout", "reordered", "deleted", "replaced", "rejected", "blocked", "cancel", "cancelDuring"])
-    func actualAdapterPreservesPageAndDoesNotReplayWrites(_ mode: String) async throws {
+    func actualAdapterClearsBeforeEachExecution(_ mode: String) async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let binary = directory.appendingPathComponent("bilibili-stub")
@@ -45,7 +45,7 @@ struct BilibiliChannelAdapterTests {
             state['opens']+=1
             result['loginRequired']=mode in ['login','retryLoginDraft'] and state['opens']==1
         if 'bilibili:clear-draft' in script:
-            if mode!='clearFailed':state.update(title='',body='',images=[])
+            if mode!='clearFailed':state.update(title='',body='',images=[],mutate=False)
         if 'bilibili:paste-title' in script:
             assert 'page.click' in script and "keyboard.press('Meta+V')" in script
             state['title']='' if mode=='unknownTitle' else \(String(reflecting: request.title))
@@ -128,14 +128,14 @@ struct BilibiliChannelAdapterTests {
             state["mutate"] = true
             try JSONSerialization.data(withJSONObject: state).write(to: path)
             if ["changedBody", "changedTitle", "reordered", "deleted", "replaced"].contains(mode) {
-                do { _ = try await execute(.resumeAfterUser); Issue.record("User edits overwritten") }
-                catch { #expect((error as? ChannelFailure)?.recovery == .inspectionRequired) }
+                let refreshed = try await execute(.resumeAfterUser)
+                if mode != "blocked" { #expect(refreshed.failure == nil) }
             } else { _ = try await execute(.resumeAfterUser) }
         }
         let log = try String(contentsOf: directory.appendingPathComponent("log"))
-        #expect(log.components(separatedBy: "bilibili:paste-title").count - 1 == (["clearFailed", "rejected"].contains(mode) ? 0 : 1))
-        #expect(log.components(separatedBy: "bilibili:paste-body").count - 1 == (["clearFailed", "rejected", "unknownTitle"].contains(mode) ? 0 : 1))
-        #expect(log.components(separatedBy: "bilibili:clear-draft").count - 1 == 1)
+        #expect(log.components(separatedBy: "bilibili:paste-title").count - 1 == (["clearFailed", "rejected"].contains(mode) ? 0 : 2))
+        #expect(log.components(separatedBy: "bilibili:paste-body").count - 1 == (["clearFailed", "rejected", "unknownTitle"].contains(mode) ? 0 : 2))
+        #expect(log.components(separatedBy: "bilibili:clear-draft").count - 1 == (mode == "rejected" ? 1 : 2))
         #expect(!log.contains("page.reload"))
         #expect(!log.contains("page.click('.bili-dyn-publishing__action"))
     }

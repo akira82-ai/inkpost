@@ -21,7 +21,7 @@ struct JuejinChannelAdapterTests {
     }
 
     @Test(arguments: ["retryClearFailed", "retryLoginDraft", "retryDraft", "valid", "login", "changedBody", "unknownBody", "unknownImage", "timeout", "reordered", "deleted", "replaced", "linkAdded", "rejected", "blocked", "cancel", "cancelDuring"])
-    func realAdapterClearsOnceAndPreservesRecovery(_ mode: String) async throws {
+    func realAdapterClearsBeforeEachExecution(_ mode: String) async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let binary = directory.appendingPathComponent("juejin-stub")
@@ -45,7 +45,7 @@ struct JuejinChannelAdapterTests {
             result['loginRequired']=mode in ['login','retryLoginDraft'] and state['opens']==1
         if 'juejin:replace-body' in script and mode!='retryClearFailed':
             assert 'Meta+A' in script and ('keyboard.insertText' in script or 'Backspace' in script) and '.preview-image .delete' in script
-            state['images']=[]; state['links']=0
+            state['images']=[]; state['links']=0; state['mutate']=False
             state['body']='' if mode=='unknownBody' or 'Backspace' in script else \(String(reflecting: expected))
             if mode=='unknownBody':result={'ok':False,'error':'unknown paste'}
         if 'juejin:paste-body' in script:state['body']=\(String(reflecting: expected))
@@ -131,13 +131,13 @@ struct JuejinChannelAdapterTests {
             state["mutate"] = true
             try JSONSerialization.data(withJSONObject: state).write(to: path)
             if ["changedBody", "reordered", "deleted", "replaced", "linkAdded"].contains(mode) {
-                do { _ = try await execute(.resumeAfterUser); Issue.record("User edits overwritten") }
-                catch { #expect((error as? ChannelFailure)?.recovery == .inspectionRequired) }
+                let refreshed = try await execute(.resumeAfterUser)
+                if mode != "blocked" { #expect(refreshed.failure == nil) }
             } else { _ = try await execute(.resumeAfterUser) }
         }
         let scripts = try String(contentsOf: directory.appendingPathComponent("log"))
-        #expect(scripts.components(separatedBy: "juejin:replace-body").count - 1 == 1)
-        let expectedImages = ["unknownBody", "rejected"].contains(mode) ? 0 : (["unknownImage", "timeout"].contains(mode) ? 1 : 2)
+        #expect(scripts.components(separatedBy: "juejin:replace-body").count - 1 == (mode == "rejected" ? 1 : 2))
+        let expectedImages = ["unknownBody", "rejected"].contains(mode) ? 0 : (["unknownImage", "timeout"].contains(mode) ? 2 : 4)
         #expect(scripts.components(separatedBy: "juejin:add-image").count - 1 == expectedImages)
         #expect(!scripts.contains("page.reload"))
         #expect(!scripts.contains("await page.click('text=发布'"))

@@ -68,13 +68,15 @@ final class BilibiliChannelAdapter: ChannelAdapter {
                 const count = await page.evaluate(() => document.querySelectorAll('.bili-dyn-publishing .bili-pics-uploader__item').length);
                 for (let i = 0; i < count; i++) {
                   await page.hover('.bili-dyn-publishing .bili-pics-uploader__item >> nth=0', {label:'显示旧图片移除入口'});
-                  await page.click('.bili-dyn-publishing .bili-pics-uploader__item__remove >> nth=0', {label:'移除 B站旧图片'});
+                  await channelClick('.bili-dyn-publishing .bili-pics-uploader__item__remove >> nth=0', {label:'移除 B站旧图片'});
                   await page.waitForFunction(expected => document.querySelectorAll('.bili-dyn-publishing .bili-pics-uploader__item').length === expected, count - i - 1, {timeout:5000});
                 }
-                await page.click('\(Self.title)', {label:'清空 B站旧标题'});
+                await channelClick('\(Self.title)', {label:'清空 B站旧标题'});
+                await waitForEditorFocus('\(Self.title)');
                 await page.press('\(Self.title)', 'Meta+A');
                 await page.keyboard.press('Backspace');
-                await page.click('\(Self.editor)', {label:'清空 B站旧正文'});
+                await channelClick('\(Self.editor)', {label:'清空 B站旧正文'});
+                await waitForEditorFocus('\(Self.editor)');
                 await page.press('\(Self.editor)', 'Meta+A');
                 await page.keyboard.press('Backspace');
                 cliLog(JSON.stringify({ok:true}));
@@ -94,7 +96,8 @@ final class BilibiliChannelAdapter: ChannelAdapter {
             _ = try await ClipboardPasteService.withTextPaste(request.title) {
                 try await context.bridge.run("""
                     // bilibili:paste-title
-                    await page.click('\(Self.title)', {label:'填写 B站动态标题'});
+                    await channelClick('\(Self.title)', {label:'填写 B站动态标题'});
+                    await waitForEditorFocus('\(Self.title)');
                     await page.keyboard.press('Meta+V');
                     cliLog(JSON.stringify({ok:true}));
                     """)
@@ -106,7 +109,8 @@ final class BilibiliChannelAdapter: ChannelAdapter {
             _ = try await ClipboardPasteService.withTextPaste(request.body) {
                 try await context.bridge.run("""
                     // bilibili:paste-body
-                    await page.click('\(Self.editor)', {label:'填写 B站动态正文'});
+                    await channelClick('\(Self.editor)', {label:'填写 B站动态正文'});
+                    await waitForEditorFocus('\(Self.editor)');
                     await page.keyboard.press('Meta+V');
                     cliLog(JSON.stringify({ok:true}));
                     """)
@@ -127,7 +131,7 @@ final class BilibiliChannelAdapter: ChannelAdapter {
                     // bilibili:add-image
                     const expanded = await page.evaluate(() => !!document.querySelector('.bili-pics-uploader__add')?.getBoundingClientRect().width);
                     const chooserPromise = page.waitForFileChooser({timeout:10000});
-                    await page.click(expanded ? '.bili-pics-uploader__add' : '.bili-dyn-publishing__tools__item.pic', {label:'添加 B站下一张图片'});
+                    await channelClick(expanded ? '.bili-pics-uploader__add' : '.bili-dyn-publishing__tools__item.pic', {label:'添加 B站下一张图片'});
                     const chooser = await chooserPromise;
                     await chooser.setFiles(\(context.bridge.jsStr(paths[index])));
                     cliLog(JSON.stringify({ok:true}));
@@ -159,6 +163,9 @@ final class BilibiliChannelAdapter: ChannelAdapter {
             try context.progress(completed: index + 1, total: request.assets.count)
         }
         try context.advance(.verifyingContent)
+        if !request.assets.isEmpty {
+            try await ChannelBrowserOperations.inspectAttachments(context, editor: Self.editor, attachments: ".bili-dyn-publishing .bili-pics-uploader__item")
+        }
         let final = try await read(context.bridge)
         try check(final, request: request)
         try validateImages(final.images)

@@ -67,7 +67,8 @@ final class JikeChannelAdapter: ChannelAdapter {
             _ = try await ClipboardPasteService.withTextPaste(expectedBody(for: request)) {
                 try await context.bridge.run("""
                     // jike:paste-body
-                    await page.click('\(Self.editor)', {label:'填写即刻想法正文'});
+                    await channelClick('\(Self.editor)', {label:'填写即刻想法正文'});
+                    await waitForEditorFocus('\(Self.editor)');
                     await page.keyboard.press('Meta+V');
                     cliLog(JSON.stringify({ok:true}));
                     """)
@@ -88,7 +89,7 @@ final class JikeChannelAdapter: ChannelAdapter {
                 _ = try await context.bridge.run("""
                     // jike:upload-image
                     const chooserPromise = page.waitForFileChooser({timeout:10000});
-                    await page.click('form [title="图片"]', {label:'添加即刻下一张图片'});
+                    await channelClick('form [title="图片"]', {label:'添加即刻下一张图片'});
                     const chooser = await chooserPromise;
                     await chooser.setFiles(\(context.bridge.jsStr(uploadPaths[index])));
                     cliLog(JSON.stringify({ok:true}));
@@ -118,6 +119,9 @@ final class JikeChannelAdapter: ChannelAdapter {
             try context.progress(completed: index + 1, total: request.assets.count)
         }
         try context.advance(.verifyingContent)
+        if !request.assets.isEmpty {
+            try await ChannelBrowserOperations.inspectAttachments(context, editor: Self.editor, attachments: "form [aria-roledescription=\"sortable\"]")
+        }
         let final = try await read(context.bridge)
         try check(final, request: request, allowEmpty: false)
         try validateImages(final.images)

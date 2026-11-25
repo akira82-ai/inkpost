@@ -63,7 +63,7 @@ final class BonjourChannelAdapter: ChannelAdapter {
                 // bonjour:open-quick-publish
                 const existing = await page.evaluate(() => document.querySelectorAll('\(Self.editor)').length);
                 if (existing === 0) {
-                    await page.click("xpath=//nav[@aria-label='主导航']//button[not(@aria-hidden='true') and normalize-space(.)='发帖']", {label:'打开 Bonjour 发帖'});
+                    await channelClick("xpath=//nav[@aria-label='主导航']//button[not(@aria-hidden='true') and normalize-space(.)='发帖']", {label:'打开 Bonjour 发帖'});
                     await page.waitForFunction(() => {
                         const editors = document.querySelectorAll('\(Self.editor)');
                         return editors.length === 1 && document.activeElement === editors[0];
@@ -95,7 +95,7 @@ final class BonjourChannelAdapter: ChannelAdapter {
             _ = try await context.bridge.run("""
                 // bonjour:reset-editor
                 for (let index = 0; index < \(initial.images.count); index++) {
-                    await page.click('[data-community-post-composer-dialog] button[aria-label="删除配图 1"]', {label:'清空 Bonjour 现有图片'});
+                    await channelClick('[data-community-post-composer-dialog] button[aria-label="删除配图 1"]', {label:'清空 Bonjour 现有图片'});
                     await page.waitForFunction(count => document.querySelectorAll('[data-community-post-composer-dialog] [data-community-media-slide]').length === count, \(initial.images.count) - index - 1, {timeout:10000});
                 }
                 await page.fill('\(Self.editor)', '');
@@ -165,6 +165,9 @@ final class BonjourChannelAdapter: ChannelAdapter {
             }
         }
         try context.advance(.verifyingContent)
+        if !request.assets.isEmpty {
+            try await ChannelBrowserOperations.inspectAttachments(context, editor: Self.editor, attachments: "[data-community-post-composer-dialog] [data-community-media-slide]")
+        }
         let final = try await read(context.bridge)
         try check(final, expected: expected, allowEmpty: false)
         try validateImages(final.images)

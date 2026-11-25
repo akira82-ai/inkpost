@@ -48,7 +48,7 @@ final class XChannelAdapter: ChannelAdapter {
             // x:open-compose
             const existing = await page.evaluate(() => document.querySelectorAll('\(Self.editor)').length);
             if (existing === 0) {
-                await page.click('a[href="/compose/post"]', {label:'打开 X 发帖窗口'});
+                await channelClick('a[href="/compose/post"]', {label:'打开 X 发帖窗口'});
             }
             await page.waitForFunction(() => {
                 const editors = document.querySelectorAll('\(Self.editor)');
@@ -63,7 +63,7 @@ final class XChannelAdapter: ChannelAdapter {
             _ = try await context.bridge.run("""
                 // x:clear-editor
                 for (let index = 0; index < \(initial.images.count); index++) {
-                    await page.click('\(Self.attachments) button[data-remove-media] >> nth=0', {label:'清空 X 原有图片'});
+                    await channelClick('\(Self.attachments) button[data-remove-media] >> nth=0', {label:'清空 X 原有图片'});
                     await page.waitForFunction(count => document.querySelectorAll('\(Self.attachments)').length === count,
                         \(initial.images.count) - index - 1, {timeout:10000});
                 }
@@ -130,6 +130,9 @@ final class XChannelAdapter: ChannelAdapter {
             }
         }
         try context.advance(.verifyingContent)
+        if !request.assets.isEmpty {
+            try await ChannelBrowserOperations.inspectAttachments(context, editor: Self.editor, attachments: Self.attachments)
+        }
         let final = try await read(context.bridge)
         try check(final, expected: expected, allowEmpty: false)
         try validateImages(final.images)

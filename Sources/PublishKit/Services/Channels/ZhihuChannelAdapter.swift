@@ -69,6 +69,9 @@ final class ZhihuChannelAdapter: ChannelAdapter {
         try context.advance(.uploadingAssets)
         try await uploadImages(uploadPaths, context: context)
         try context.advance(.verifyingContent)
+        if !request.assets.isEmpty {
+            try await ChannelBrowserOperations.inspectAttachments(context, editor: Self.bodyTarget, attachments: ".InputLike .ImageArea .DraggableTags-tag:not(.DraggableTags-undraggable)")
+        }
         let final = try await readPage(context.bridge)
         try final.checkContent(request, allowEmpty: false)
         try images.validate(final.images)
@@ -88,7 +91,8 @@ final class ZhihuChannelAdapter: ChannelAdapter {
         _ = try await ClipboardPasteService.withTextPaste(body) {
             try await bridge.run("""
                 // zhihu:paste-body
-                await page.click(\(bridge.jsStr(Self.bodyTarget)), {label:'粘贴完整正文'});
+                await channelClick(\(bridge.jsStr(Self.bodyTarget)), {label:'粘贴完整正文'});
+                await waitForEditorFocus(\(bridge.jsStr(Self.bodyTarget)));
                 await page.keyboard.press('Meta+V');
                 cliLog(JSON.stringify({ok:true}));
                 """)
@@ -113,7 +117,8 @@ final class ZhihuChannelAdapter: ChannelAdapter {
                 try context.progress(completed: index, total: paths.count)
                 _ = try await context.bridge.run("""
                     // zhihu:paste-image
-                    await page.click(\(context.bridge.jsStr(Self.bodyTarget)), {label:'粘贴下一张想法图片'});
+                    await channelClick(\(context.bridge.jsStr(Self.bodyTarget)), {label:'粘贴下一张想法图片'});
+                    await waitForEditorFocus(\(context.bridge.jsStr(Self.bodyTarget)));
                     await page.keyboard.press('Meta+V');
                     cliLog(JSON.stringify({ok:true}));
                     """)
@@ -256,7 +261,7 @@ final class ZhihuChannelAdapter: ChannelAdapter {
                 const el = document.querySelector('textarea[name="title"]');
                 return !!el && el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0;
               });
-              if (!expanded) await page.click('text="分享此刻的想法..."', {label:'展开知乎想法编辑器'});
+              if (!expanded) await channelClick('text="分享此刻的想法..."', {label:'展开知乎想法编辑器'});
               await page.waitForSelector('textarea[name="title"]', {state:'visible',timeout:10000});
               await page.waitForSelector('[contenteditable="true"]', {state:'visible',timeout:10000});
               cliLog(JSON.stringify({ok:true,composerReady:true}));

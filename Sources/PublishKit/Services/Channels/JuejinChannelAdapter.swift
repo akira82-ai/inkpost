@@ -68,12 +68,15 @@ final class JuejinChannelAdapter: ChannelAdapter {
             _ = try await context.bridge.run("""
                 // juejin:replace-body
                 for (let i = 0; i < \(initial.images.count); i++) {
-                  await page.click('.pin-editor .preview-image .delete >> nth=0', {label:'移除沸点原有附件'});
+                  await channelClick('.pin-editor .preview-image .delete >> nth=0', {label:'移除沸点原有附件'});
+                  await page.waitForFunction(expected => document.querySelectorAll('.pin-editor .preview-image').length === expected, \(initial.images.count) - i - 1, {timeout:5000});
                 }
                 for (let i = 0; i < \(initial.linkCount); i++) {
-                  await page.click('.pin-editor .preview-link .close', {label:'移除沸点原有链接卡片'});
+                  await channelClick('.pin-editor .preview-link .close', {label:'移除沸点原有链接卡片'});
+                  await page.waitForFunction(expected => document.querySelectorAll('.pin-editor .preview-link').length === expected, \(initial.linkCount) - i - 1, {timeout:5000});
                 }
-                await page.click('\(Self.editor)', {label:'替换沸点原有正文'});
+                await channelClick('\(Self.editor)', {label:'替换沸点原有正文'});
+                await waitForEditorFocus('\(Self.editor)');
                 await page.keyboard.press('Meta+A');
                 await page.keyboard.press('Backspace');
                 cliLog(JSON.stringify({ok:true}));
@@ -128,6 +131,9 @@ final class JuejinChannelAdapter: ChannelAdapter {
             try context.progress(completed: index + 1, total: request.assets.count)
         }
         try context.advance(.verifyingContent)
+        if !request.assets.isEmpty {
+            try await ChannelBrowserOperations.inspectAttachments(context, editor: Self.editor, attachments: ".pin-editor .preview-image")
+        }
         let final = try await read(context.bridge)
         try check(final, request: request)
         try validateImages(final.images)

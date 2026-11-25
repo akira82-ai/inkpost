@@ -68,7 +68,7 @@ final class WeiboChannelAdapter: ChannelAdapter {
                 // weibo:open-quick-publish
                 const existing = await page.evaluate(() => document.querySelectorAll('\(Self.editor)').length);
                 if (existing === 0) {
-                    await page.click('button[title="发微博"]', {label:'打开微博快捷发布'});
+                    await channelClick('button[title="发微博"]', {label:'打开微博快捷发布'});
                     await page.waitForFunction(() => {
                         const editors = document.querySelectorAll('\(Self.editor)');
                         return editors.length === 1 && document.activeElement === editors[0];
@@ -160,6 +160,9 @@ final class WeiboChannelAdapter: ChannelAdapter {
             }
         }
         try context.advance(.verifyingContent)
+        if !request.assets.isEmpty {
+            try await ChannelBrowserOperations.inspectAttachments(context, editor: Self.editor, attachments: ".woo-modal-main .wbpro-layer div[class^=\"_picbed_\"]:not(:has(input[type=\"file\"]))")
+        }
         let final = try await read(context.bridge)
         try check(final, expected: expected, allowEmpty: false)
         try validateImages(final.images)

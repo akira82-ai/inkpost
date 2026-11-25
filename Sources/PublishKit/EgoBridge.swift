@@ -91,10 +91,13 @@ public struct EgoBridge {
 
     /// 把一段官方 helper 调用包进"Space 恢复 + 单脚本执行 + 结果提取"
     func run(_ body: String) async throws -> String {
+        try Task.checkCancellation()
+        let helpers = body.contains("channelClick(") ? ChannelBrowserOperations.clickSource : ""
         let script = """
         const task = await taskSpace(\(spaceID.map(String.init) ?? jsStr(spaceName)));
         const page = task.page(\(jsStr(pageLabel)));
         try {
+          \(helpers)
           \(body)
         } catch (e) {
           cliLog(JSON.stringify({ ok: false, error: String(e && e.message || e) }));

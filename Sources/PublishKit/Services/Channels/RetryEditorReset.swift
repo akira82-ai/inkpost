@@ -35,7 +35,7 @@ enum RetryEditorReset {
                 };
                 return 'xpath=' + path(controls[0]);
             }, tiles);
-            await page.click(target, {label:'清空编辑区旧附件'});
+            await channelClick(target, {label:'清空编辑区旧附件'});
             await page.waitForFunction(({selector, expected}) => document.querySelectorAll(selector).length === expected,
                 {selector:tiles, expected:\(count) - index - 1}, {timeout:10000});
         }

@@ -336,7 +336,7 @@ struct ChannelGrid: View {
     let controller: DispatchController
     private var editing: Bool { model.overallPhase == .pending }
     var body: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
             ForEach(ChannelPresentation.all.filter(\.available)) { channel in
                 Group {
                     if editing {
@@ -360,7 +360,8 @@ struct ChannelGrid: View {
     private func label(_ channel: ChannelPresentation) -> some View {
         HStack(spacing: 4) {
             ChannelBadge(channel: channel)
-            Text(channel.name).font(InkStyle.font(11)).lineLimit(1).frame(maxWidth: .infinity)
+            Text(channel.name).font(InkStyle.font(11)).lineLimit(2)
+                .multilineTextAlignment(.center).frame(maxWidth: .infinity)
             if !editing, let platform = channel.platform, model.taskPlatforms.contains(platform),
                let phase = model.platformPhase[platform] {
                 statusIcon(ChannelStatusPresentation(phase: phase), platform: platform)

@@ -61,8 +61,7 @@ struct ContentView: View {
                                 .font(InkStyle.font(11)).foregroundStyle(InkStyle.muted)
                         }.settingsGroup()
                     case "AI 辅助":
-                        ContentUnavailableView("AI 辅助尚未接入", systemImage: "sparkles",
-                            description: Text("接口配置将随 AI 辅助能力一起提供。"))
+                        AISettingsView().settingsGroup()
                     default:
                         if let updates { SoftwareUpdateSettings(controller: updates, model: updates.state) }
                         VStack(spacing: 0) {

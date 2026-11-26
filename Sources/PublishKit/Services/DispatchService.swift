@@ -295,7 +295,10 @@ public final class DispatchService: DispatchServicing {
             if taskID == execution.taskID { sessions[platform] = (request, outcome) }
             return outcome
         }
-        defer { context.finish() }
+        defer {
+            if taskID == execution.taskID { bridges[platform] = context.bridge }
+            context.finish()
+        }
         var outcome: ChannelOutcome
         do {
             outcome = try await requiredAdapter(platform).execute(request: request, context: context)

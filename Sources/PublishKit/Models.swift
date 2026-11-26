@@ -13,6 +13,7 @@ public enum PlatformID: String, Codable, CaseIterable, Identifiable, Sendable {
     case bilibili
     case x
     case bonjour
+    case wechatSticker = "wechat-sticker"
 
     public var id: String { rawValue }
 
@@ -27,6 +28,7 @@ public enum PlatformID: String, Codable, CaseIterable, Identifiable, Sendable {
         case .bilibili: return "B站动态"
         case .x: return "X"
         case .bonjour: return "Bonjour"
+        case .wechatSticker: return "微信公众号贴图"
         }
     }
 

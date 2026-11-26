@@ -60,7 +60,7 @@ public struct ChannelEvent: Sendable {
 public final class ChannelExecutionContext {
     public let execution: ChannelExecutionID
     public let command: ChannelCommand
-    public let bridge: EgoBridge
+    public private(set) var bridge: EgoBridge
     public let preparedAssets: [PreparedAsset]
     public private(set) var stage: ChannelStage = .validatingRequest
     private let onEvent: @MainActor @Sendable (ChannelEvent) -> Void
@@ -68,6 +68,9 @@ public final class ChannelExecutionContext {
     public init(execution: ChannelExecutionID, command: ChannelCommand, bridge: EgoBridge, preparedAssets: [PreparedAsset] = [],
                 onEvent: @escaping @MainActor @Sendable (ChannelEvent) -> Void) {
         self.execution = execution; self.command = command; self.bridge = bridge; self.preparedAssets = preparedAssets; self.onEvent = onEvent
+    }
+    func followBrowserPage(_ label: String) throws {
+        bridge = try EgoBridge(spaceName: bridge.spaceName, engine: bridge.engine, pageLabel: label, spaceID: bridge.spaceID)
     }
     public func uploadPaths(for request: ChannelRequest) throws -> [String] {
         guard preparedAssets.map(\.sourcePath) == request.assets else {

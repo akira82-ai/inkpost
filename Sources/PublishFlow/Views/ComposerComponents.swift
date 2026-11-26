@@ -305,6 +305,7 @@ struct ChannelPresentation: Identifiable {
     let badge: String
     let tone: UInt32
     var available: Bool { platform?.isAvailable == true }
+    var displayName: String { platform == .wechatSticker ? "微信贴图" : name }
     static let all: [Self] = {
         let styled: [Self] = [
             .init(id: "zhihu", platform: .zhihu, name: "知乎", badge: "知", tone: 0x3C78B6),
@@ -334,7 +335,9 @@ struct ChannelBadge: View {
 struct ChannelGrid: View {
     let model: DispatchModel
     let controller: DispatchController
+    @State private var hoveredChannel: String?
     private var editing: Bool { model.overallPhase == .pending }
+
     var body: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
             ForEach(ChannelPresentation.all.filter(\.available)) { channel in
@@ -343,59 +346,63 @@ struct ChannelGrid: View {
                         Button {
                             if let platform = channel.platform { controller.select(platform) }
                         } label: { label(channel) }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(channel.name)
                         .accessibilityAddTraits(channel.isSelected(in: model) ? .isSelected : [])
+                    } else if let platform = channel.platform, controller.canRetry(platform) {
+                        Button { controller.retry(platform) } label: { label(channel) }
+                            .disabled(model.overallPhase == .preparing || model.isHandingOff || model.isSettling)
+                            .help("重试\(channel.name)：关闭旧页面，使用上次稿件重新填写")
+                            .accessibilityLabel("重试\(channel.name)")
+                    } else if let status = status(for: channel), status.canOpen, let platform = channel.platform {
+                        Button { controller.openChannel(platform) } label: { label(channel) }
+                            .disabled(model.isHandingOff || model.isSettling)
+                            .help("\(channel.name)：\(status.title)，点击前往对应页面")
+                            .accessibilityLabel("\(channel.name)，\(status.title)，前往对应页面")
                     } else {
                         label(channel)
                     }
                 }
+                .buttonStyle(.plain)
                 .foregroundStyle(InkStyle.ink)
                 .background(channel.isSelected(in: model) ? InkStyle.selected : .clear, in: RoundedRectangle(cornerRadius: 7))
                 .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(channel.isSelected(in: model) ? InkStyle.selectedLine : InkStyle.line))
+                .onHover { hoveredChannel = $0 ? channel.id : nil }
             }
         }.transaction { $0.animation = nil }
     }
 
-    private func label(_ channel: ChannelPresentation) -> some View {
-        HStack(spacing: 4) {
-            ChannelBadge(channel: channel)
-            Text(channel.name).font(InkStyle.font(11)).lineLimit(2)
-                .multilineTextAlignment(.center).frame(maxWidth: .infinity)
-            if !editing, let platform = channel.platform, model.taskPlatforms.contains(platform),
-               let phase = model.platformPhase[platform] {
-                statusIcon(ChannelStatusPresentation(phase: phase), platform: platform)
-            }
-        }.padding(.horizontal, 6).frame(height: 36).frame(maxWidth: .infinity)
-            .contentShape(RoundedRectangle(cornerRadius: 7))
+    private func status(for channel: ChannelPresentation) -> ChannelStatusPresentation? {
+        guard !editing, let platform = channel.platform, model.taskPlatforms.contains(platform),
+              let phase = model.platformPhase[platform], phase != .pending else { return nil }
+        return ChannelStatusPresentation(phase: phase)
     }
 
-    @ViewBuilder private func statusIcon(_ status: ChannelStatusPresentation, platform: PlatformID) -> some View {
-        if controller.canRetry(platform) {
-            Button { controller.retry(platform) } label: {
-                Image(systemName: "arrow.clockwise").font(.system(size: 12, weight: .medium))
-                    .frame(width: 24, height: 26).contentShape(Rectangle())
-            }.buttonStyle(.plain)
-                .disabled(model.overallPhase == .preparing || model.isHandingOff || model.isSettling)
-                .help("重试\(platform.title)：关闭旧页面，使用上次稿件重新填写")
-                .accessibilityLabel("重试\(platform.title)")
-        } else if status.canOpen {
-            Button { controller.openChannel(platform) } label: {
-                Image(systemName: status.symbol).font(.system(size: 12, weight: .medium))
-                    .frame(width: 24, height: 26).contentShape(Rectangle())
-            }.buttonStyle(.plain).foregroundStyle(Color(hex: status == .login ? 0x977126 : 0xA16C42))
-                .disabled(model.isHandingOff || model.isSettling)
-                .help("\(platform.title)：\(status.title)，点击前往对应页面")
-                .accessibilityLabel("\(platform.title)，\(status.title)，前往对应页面")
-        } else if status == .filling {
-            ProgressView().controlSize(.mini).frame(width: 24, height: 26)
-                .help("\(platform.title)：\(status.title)")
-                .accessibilityLabel("\(platform.title)，\(status.title)")
+    private func label(_ channel: ChannelPresentation) -> some View {
+        HStack(spacing: 5) {
+            Group {
+                if let status = status(for: channel) {
+                    statusIcon(status, channel: channel)
+                } else {
+                    ChannelBadge(channel: channel)
+                }
+            }.frame(width: 17, height: 17).accessibilityHidden(true)
+            Text(channel.displayName).font(InkStyle.font(11)).lineLimit(1)
+                .frame(maxWidth: .infinity)
+        }.padding(.horizontal, 6).frame(height: 36).frame(maxWidth: .infinity)
+            .contentShape(RoundedRectangle(cornerRadius: 7))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(channel.name)
+            .accessibilityValue(status(for: channel)?.title ?? (channel.isSelected(in: model) ? "已选择" : "未选择"))
+            .help("\(channel.name)\(status(for: channel).map { "：" + $0.title } ?? "")")
+    }
+
+    @ViewBuilder private func statusIcon(_ status: ChannelStatusPresentation, channel: ChannelPresentation) -> some View {
+        if status == .filling {
+            ProgressView().controlSize(.mini)
         } else {
-            Image(systemName: status.symbol).font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Color(hex: 0x567749)).frame(width: 24, height: 26)
-                .help("\(platform.title)：\(status.title)")
-                .accessibilityLabel("\(platform.title)，\(status.title)")
+            let retryHovered = hoveredChannel == channel.id && channel.platform.map { controller.canRetry($0) } == true
+            Image(systemName: retryHovered ? "arrow.clockwise" : status == .ready ? "checkmark.circle" : "exclamationmark.circle")
+                .font(.system(size: 15, weight: .regular))
+                .foregroundStyle(Color(hex: status == .ready ? 0x567749 : 0xA16C42))
         }
     }
 }

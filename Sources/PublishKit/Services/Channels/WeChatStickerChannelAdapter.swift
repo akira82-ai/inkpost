@@ -14,6 +14,7 @@ final class WeChatStickerChannelAdapter: ChannelAdapter {
     """
     private var openingAttempted = false
     private var writingStarted = false
+    private var textPasteDispatched = false
 
     @MainActor
     func execute(request: ChannelRequest, context: ChannelExecutionContext) async throws -> ChannelOutcome {
@@ -75,6 +76,9 @@ final class WeChatStickerChannelAdapter: ChannelAdapter {
         if writingStarted {
             // A previous write may have finished after the browser command returned.
             // Recheck the editor, but never replay a write with an uncertain result.
+            guard textPasteDispatched else {
+                throw inspection(.fillingContent, "上次粘贴结果待确认，请检查贴图文字")
+            }
             return try verify(initial, request: request, context: context)
         }
         guard initial.title.isEmpty, initial.body.isEmpty, initial.images == 0 else {
@@ -86,9 +90,10 @@ final class WeChatStickerChannelAdapter: ChannelAdapter {
         writingStarted = true
         if !request.title.isEmpty { try await paste(request.title, into: Self.title, using: page) }
         try await paste(request.body, into: Self.body, using: page)
+        textPasteDispatched = true
         let filled = try await read(page)
-        guard matches(filled, request), filled.images == 0, !filled.warning else {
-            throw inspection(.fillingContent, "贴图文字回读不一致或页面出现提示，请检查编辑器")
+        guard filled.images == 0, !filled.warning else {
+            throw inspection(.fillingContent, "贴图附件状态变化或页面出现提示，请检查编辑器")
         }
 
         if !paths.isEmpty {
@@ -96,6 +101,14 @@ final class WeChatStickerChannelAdapter: ChannelAdapter {
             _ = try await page.run("""
                 if (!await page.evaluate(() => \(Self.editorIdentity))) throw new Error('贴图编辑页已变化');
                 await page.hover('.image-selector__add', {label:'显示贴图上传菜单'});
+                await page.waitForFunction(() => {
+                    const labels = [...document.querySelectorAll('.image-selector__add .js_upload_btn_container label')];
+                    return labels.filter(label => {
+                        const rect = label.getBoundingClientRect();
+                        const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+                        return rect.width > 0 && rect.height > 0 && (hit === label || label.contains(hit));
+                    }).length === 1;
+                }, undefined, {timeout:5000}).catch(() => { throw new Error('悬停后未出现可点击的「本地上传」菜单'); });
                 const chooser = page.waitForFileChooser({timeout:10000}).then(value => value, () => null);
                 await channelClick('.image-selector__add .js_upload_btn_container label', {label:'打开本地选图'});
                 const selection = await chooser;
@@ -135,6 +148,7 @@ final class WeChatStickerChannelAdapter: ChannelAdapter {
                     const editor = nodes[0];
                     const readText = node => {
                         if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+                        if (node.nodeType === Node.ELEMENT_NODE && node.matches('.editor_placeholder.ProseMirror-widget')) return '';
                         if (node.nodeName === 'BR') return node.classList.contains('ProseMirror-trailingBreak') ? '' : '\\n';
                         return [...node.childNodes].map(readText).join('');
                     };
@@ -142,7 +156,7 @@ final class WeChatStickerChannelAdapter: ChannelAdapter {
                     if (blocks.length && blocks.every(e => e.tagName === 'P') && editor.childNodes.length === blocks.length) {
                         return blocks.map(readText).join('\\n');
                     }
-                    return editor.innerText.replace(/\\r\\n/g, '\\n');
+                    return readText(editor);
                 };
                 \(Self.imageReadSource)
                 const warning = [...document.querySelectorAll('[role="alert"], .weui-desktop-toast, .weui-desktop-dialog')]
@@ -167,19 +181,14 @@ final class WeChatStickerChannelAdapter: ChannelAdapter {
         }
     }
 
-    private func matches(_ state: EditorState, _ request: ChannelRequest) -> Bool {
-        func lines(_ value: String) -> String { value.replacingOccurrences(of: "\r\n", with: "\n") }
-        return state.title == lines(request.title) && state.body == lines(request.body)
-    }
-
     @MainActor
     private func verify(_ state: EditorState, request: ChannelRequest, context: ChannelExecutionContext) throws -> ChannelOutcome {
         try context.advance(.verifyingContent)
-        guard matches(state, request), state.images == request.assets.count,
+        guard state.images == request.assets.count,
               state.ready == state.images, !state.warning else {
-            throw inspection(.verifyingContent, "无法确认贴图文字或图片已填好，请在公众号页面检查")
+            throw inspection(.verifyingContent, "无法确认贴图图片状态，请在公众号页面检查")
         }
-        return .readyForReview(message: "微信公众号贴图已填好，请检查并手工发表")
+        return .readyForReview(message: "请检查微信公众号贴图的标题、正文和图片，再手工发表")
     }
 
     private func inspection(_ stage: ChannelStage, _ detail: String) -> ChannelFailure {

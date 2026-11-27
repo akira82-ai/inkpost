@@ -41,6 +41,14 @@ struct QuietIcon: View {
     }
 }
 
+private struct ComposerActionColor: ViewModifier {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func body(content: Content) -> some View {
+        content.foregroundStyle(Color(hex: isEnabled ? 0x46643E : 0xA1A596))
+    }
+}
+
 private struct GenerateTextButton: View {
     let title: String
     let isGenerating: Bool
@@ -49,12 +57,13 @@ private struct GenerateTextButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
-                Text(isGenerating ? "生成中" : title)
+                Text(isGenerating ? (title == "文字检查" ? "检查中" : "生成中") : title)
                 if isGenerating {
                     ProgressView().controlSize(.mini).scaleEffect(0.8)
                 }
             }
             .frame(minHeight: 26)
+            .modifier(ComposerActionColor())
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -72,6 +81,9 @@ struct ComposerFields: View {
     @State private var topics = TopicController()
     @State private var titles = TitleController()
     @State private var layout = LayoutController()
+    @State private var proofreading = ProofreadingController()
+    @State private var expandedSuggestions = false
+    @State private var bodySelection: EditorSelection?
     @FocusState private var titleFocused: Bool
     private var editable: Bool { model.overallPhase == .pending }
     private var hasBody: Bool { !model.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -102,7 +114,7 @@ struct ComposerFields: View {
             Rectangle().fill(Color(hex: 0xEEEEE6)).frame(height: 1).padding(.bottom, 12)
             VStack(spacing: 0) {
                 ZStack(alignment: .topLeading) {
-                    PasteEditor(text: $model.markdown, enabled: editable, onImages: onImages, onFiles: onFiles, focusRequest: bodyFocusRequest)
+                    PasteEditor(text: $model.markdown, enabled: editable, onImages: onImages, onFiles: onFiles, focusRequest: bodyFocusRequest, selection: bodySelection)
                     if model.markdown.isEmpty {
                         Text("正文（必填），支持换行和 emoji；图片选填…")
                             .font(InkStyle.font(13)).foregroundStyle(InkStyle.placeholder)
@@ -112,7 +124,7 @@ struct ComposerFields: View {
                 HStack(spacing: 0) {
                     Button { model.markdown = "" } label: {
                         Text("清空").font(InkStyle.font(10))
-                            .foregroundStyle(model.markdown.isEmpty || !editable ? Color(hex: 0xC4C7BD) : InkStyle.muted)
+                            .modifier(ComposerActionColor())
                             .frame(minWidth: 34, minHeight: 26).contentShape(Rectangle())
                     }.buttonStyle(.plain).disabled(model.markdown.isEmpty || !editable)
                         .accessibilityLabel("清空正文")
@@ -128,11 +140,16 @@ struct ComposerFields: View {
                         titles.generate(for: model)
                     }.disabled(!editable || !hasBody || !model.title.isEmpty)
                         .padding(.leading, 10)
+                    GenerateTextButton(title: "文字检查", isGenerating: proofreading.isChecking) {
+                        expandedSuggestions = false
+                        proofreading.check(model)
+                    }.disabled(!editable || (!hasBody && model.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+                        .padding(.leading, 10)
                     Spacer(minLength: 0)
                     Text("\(model.markdown.count) 字").font(InkStyle.font(10)).monospacedDigit()
                         .foregroundStyle(InkStyle.placeholder).padding(.horizontal, 4).padding(.trailing, 20)
                 }.buttonStyle(.plain).font(InkStyle.font(10)).frame(height: 30).background(InkStyle.paper)
-                if editable, let message = layout.message ?? topics.message {
+                if editable, let message = proofreading.message ?? layout.message ?? topics.message {
                     Text(message).font(.caption).foregroundStyle(InkStyle.ink)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -140,13 +157,75 @@ struct ComposerFields: View {
             // Six 23.4pt lines plus text insets; the 30pt footer never scrolls.
             }.frame(height: ceil(6 * 23.4 + 10) + 30)
 
+            if editable && !proofreading.suggestions.isEmpty { proofreadingResults }
         }.foregroundStyle(InkStyle.ink)
-            .onChange(of: model.markdown) { _, body in topics.contentChanged(to: body); titles.cancel(); layout.cancel() }
-            .onChange(of: model.title) { topics.cancel(); titles.cancel() }
+            .onChange(of: model.markdown) { _, body in topics.contentChanged(to: body); titles.cancel(); layout.cancel(); proofreading.draftChanged(model) }
+            .onChange(of: model.title) { topics.cancel(); titles.cancel(); proofreading.draftChanged(model) }
             .onChange(of: model.selectedPlatforms) { topics.cancel(); titles.cancel() }
-            .onChange(of: editable) { topics.cancel(); titles.cancel(); layout.cancel() }
-            .onDisappear { topics.cancel(); titles.cancel(); layout.cancel() }
+            .onChange(of: editable) { topics.cancel(); titles.cancel(); layout.cancel(); proofreading.reset() }
+            .onDisappear { topics.cancel(); titles.cancel(); layout.cancel(); proofreading.reset() }
     }
+
+    private var proofreadingResults: some View {
+        let suggestions = proofreading.suggestions
+        return VStack(alignment: .leading, spacing: 5) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(expandedSuggestions ? suggestions : Array(suggestions.prefix(1))) { item in
+                        HStack(alignment: .top, spacing: 8) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 4) {
+                                    Button { locate(item) } label: {
+                                        Text(item.original).underline().modifier(ComposerActionColor())
+                                    }
+                                    Text("→")
+                                    Text(item.replacement.isEmpty ? "删除" : item.replacement)
+                                }
+                                Text(item.reason).foregroundStyle(InkStyle.muted)
+                            }
+                            Spacer(minLength: 6)
+                            Button("替换") { proofreading.replace(item.id, in: model) }.modifier(ComposerActionColor())
+                            Button("忽略") { proofreading.ignore(item.id) }.modifier(ComposerActionColor())
+                        }
+                    }
+                }
+            }.frame(maxHeight: expandedSuggestions && suggestions.count > 1 ? 120 : nil)
+                .fixedSize(horizontal: false, vertical: !expandedSuggestions || suggestions.count < 2)
+            if suggestions.count > 1 {
+                Button(expandedSuggestions ? "收起" : "还有 \(suggestions.count - 1) 条") {
+                    expandedSuggestions.toggle()
+                }.modifier(ComposerActionColor())
+            }
+        }
+        .font(InkStyle.font(11))
+        .buttonStyle(.plain)
+        .padding(8)
+        .background(InkStyle.selected.opacity(0.4), in: RoundedRectangle(cornerRadius: 7))
+        .padding(.bottom, 8)
+    }
+
+    private func locate(_ item: ProofreadingController.Suggestion) {
+        guard let location = proofreading.location(item.id, in: model) else { return }
+        if location.isTitle {
+            titleFocused = true
+            DispatchQueue.main.async {
+                guard let current = proofreading.location(item.id, in: model),
+                      let editor = NSApp.keyWindow?.firstResponder as? NSTextView,
+                      editor.isFieldEditor, editor.string == model.title else { return }
+                editor.setSelectedRange(current.range)
+                editor.scrollRangeToVisible(current.range)
+            }
+        } else {
+            bodySelection = EditorSelection(text: model.markdown, range: location.range)
+        }
+    }
+
+}
+
+struct EditorSelection {
+    let id = UUID()
+    let text: String
+    let range: NSRange
 }
 
 struct PasteEditor: NSViewRepresentable {
@@ -155,6 +234,7 @@ struct PasteEditor: NSViewRepresentable {
     let onImages: (Data) -> Void
     let onFiles: ([String]) -> Void
     var focusRequest: UUID?
+    var selection: EditorSelection?
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView()
@@ -191,10 +271,19 @@ struct PasteEditor: NSViewRepresentable {
             context.coordinator.lastFocusRequest = focusRequest
             editor.requestBodyFocus()
         }
+        if enabled, let selection, context.coordinator.lastSelection != selection.id {
+            context.coordinator.lastSelection = selection.id
+            if editor.string == selection.text {
+                editor.requestBodyFocus()
+                editor.setSelectedRange(selection.range)
+                editor.scrollRangeToVisible(selection.range)
+            }
+        }
     }
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: PasteEditor
         var lastFocusRequest: UUID?
+        var lastSelection: UUID?
         init(_ parent: PasteEditor) { self.parent = parent }
         func textDidChange(_ notification: Notification) {
             if let view = notification.object as? NSTextView { parent.text = view.string }

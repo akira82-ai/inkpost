@@ -4,10 +4,30 @@ enum LayoutService {
     static func format(_ body: String) async throws -> String {
         let url = try Resources.url("layout", ext: "txt", sub: "Prompts")
         let prompt = try String(contentsOf: url, encoding: .utf8)
-        let input = String(decoding: try JSONEncoder().encode(["body": body]), as: UTF8.self)
+        let normalized = normalizeParagraphEscapes(body)
+        let input = String(decoding: try JSONEncoder().encode(["body": normalized]), as: UTF8.self)
         let response = try await AIClient.shared.complete(configuration: AISettings().load(),
             key: AISettings.readKey(), system: prompt, text: input)
-        return try validatedBody(from: response, original: body)
+        return try validatedBody(from: response, original: normalized)
+    }
+
+    private static let structure = #"[`<>\[\]*_]|(?m)^(?:[ \t]|#{1,6}[ \t]|[+\-–][ \t]|~{3}|\d+[.)][ \t])|(?m) {2,}$"#
+    private static let protected = #"(?:[a-zA-Z][a-zA-Z0-9+.-]*://|www\.)\S+|[#＃][\p{L}\p{M}\p{N}_-]+[#＃]?"#
+
+    // Repair only prose paragraph markers. Leave code, links and tags intact.
+    static func normalizeParagraphEscapes(_ body: String) -> String {
+        guard body.range(of: structure, options: .regularExpression) == nil else { return body }
+        let pattern = protected + #"|(?<=[。！？；：.!?;:])(?:\\n){1,2}(?!\\)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return body }
+        var result = body
+        for match in regex.matches(in: body, range: NSRange(body.startIndex..., in: body)).reversed() {
+            guard let range = Range(match.range, in: result) else { continue }
+            let marker = result[range]
+            if marker == #"\n"# || marker == #"\n\n"# {
+                result.replaceSubrange(range, with: marker.count == 2 ? "\n" : "\n\n")
+            }
+        }
+        return result
     }
 
     static func validatedBody(from response: String, original: String) throws -> String {
@@ -17,10 +37,8 @@ enum LayoutService {
         if body.utf8.elementsEqual(original.utf8) { return original }
 
         // Structured drafts can contain significant whitespace, including Markdown hard breaks.
-        let structure = #"[`<>\[\]*_]|(?m)^(?:[ \t]|#{1,6}[ \t]|[+\-–][ \t]|~{3}|\d+[.)][ \t])|(?m) {2,}$"#
         if original.range(of: structure, options: .regularExpression) != nil { return original }
 
-        let protected = #"(?:[a-zA-Z][a-zA-Z0-9+.-]*://|www\.)\S+|[#＃][\p{L}\p{M}\p{N}_-]+[#＃]?"#
         let regex = try NSRegularExpression(pattern: protected)
         func protectedText(_ text: String) -> [String] {
             regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap {

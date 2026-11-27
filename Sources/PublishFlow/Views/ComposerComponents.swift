@@ -41,14 +41,39 @@ struct QuietIcon: View {
     }
 }
 
+private struct GenerateTextButton: View {
+    let title: String
+    let isGenerating: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Text(isGenerating ? "生成中" : title)
+                if isGenerating {
+                    ProgressView().controlSize(.mini).scaleEffect(0.8)
+                }
+            }
+            .frame(minHeight: 26)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .font(InkStyle.font(10))
+        .accessibilityLabel(isGenerating ? "正在" + title : title)
+        .disabled(isGenerating)
+    }
+}
+
 struct ComposerFields: View {
     @Bindable var model: DispatchModel
     var bodyFocusRequest: UUID?
     let onImages: (Data) -> Void
     let onFiles: ([String]) -> Void
     @State private var topics = TopicController()
+    @State private var titles = TitleController()
     @FocusState private var titleFocused: Bool
     private var editable: Bool { model.overallPhase == .pending }
+    private var hasBody: Bool { !model.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
@@ -64,10 +89,19 @@ struct ComposerFields: View {
                             .allowsHitTesting(false).accessibilityHidden(true)
                     }
                 }
+                GenerateTextButton(title: "生成标题", isGenerating: titles.isGenerating) {
+                    titles.generate(for: model)
+                }.disabled(!editable || !hasBody || !model.title.isEmpty)
+                    .padding(.leading, 10)
                 QuietIcon(symbol: "xmark", label: "清空标题") { model.title = ""; titleFocused = true }
                     .opacity(model.title.isEmpty ? 0 : 1).disabled(model.title.isEmpty || !editable)
                     .accessibilityHidden(model.title.isEmpty).frame(width: 30)
             }.padding(.vertical, 9)
+            if editable, let message = titles.message {
+                Text(message).font(.caption)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.bottom, 5)
+            }
             Rectangle().fill(Color(hex: 0xEEEEE6)).frame(height: 1).padding(.bottom, 12)
             VStack(spacing: 0) {
                 ZStack(alignment: .topLeading) {
@@ -85,19 +119,10 @@ struct ComposerFields: View {
                             .frame(minWidth: 34, minHeight: 26).contentShape(Rectangle())
                     }.buttonStyle(.plain).disabled(model.markdown.isEmpty || !editable)
                         .accessibilityLabel("清空正文")
-                    Button { topics.generate(for: model) } label: {
-                        HStack(spacing: 5) {
-                            Text(topics.isGenerating ? "生成中" : "生成话题")
-                            if topics.isGenerating {
-                                ProgressView().controlSize(.mini).scaleEffect(0.8)
-                            }
-                        }
-                        .frame(minHeight: 26)
-                        .contentShape(Rectangle())
-                    }
-                    .accessibilityLabel(topics.isGenerating ? "正在生成话题" : "生成话题")
-                    .disabled(!editable || topics.isGenerating || model.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .padding(.leading, 10)
+                    GenerateTextButton(title: "生成话题", isGenerating: topics.isGenerating) {
+                        topics.generate(for: model)
+                    }.disabled(!editable || !hasBody)
+                        .padding(.leading, 10)
                     Spacer(minLength: 0)
                     Text("\(model.markdown.count) 字").font(InkStyle.font(10)).monospacedDigit()
                         .foregroundStyle(InkStyle.placeholder).padding(.horizontal, 4).padding(.trailing, 20)
@@ -111,11 +136,11 @@ struct ComposerFields: View {
             }.frame(height: ceil(6 * 23.4 + 10) + 30)
 
         }.foregroundStyle(InkStyle.ink)
-            .onChange(of: model.markdown) { _, body in topics.contentChanged(to: body) }
-            .onChange(of: model.title) { topics.cancel() }
-            .onChange(of: model.selectedPlatforms) { topics.cancel() }
-            .onChange(of: editable) { topics.cancel() }
-            .onDisappear { topics.cancel() }
+            .onChange(of: model.markdown) { _, body in topics.contentChanged(to: body); titles.cancel() }
+            .onChange(of: model.title) { topics.cancel(); titles.cancel() }
+            .onChange(of: model.selectedPlatforms) { topics.cancel(); titles.cancel() }
+            .onChange(of: editable) { topics.cancel(); titles.cancel() }
+            .onDisappear { topics.cancel(); titles.cancel() }
     }
 }
 

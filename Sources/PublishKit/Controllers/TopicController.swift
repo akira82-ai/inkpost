@@ -8,7 +8,6 @@ public final class TopicController {
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var generation = UUID()
     private var appended: String?
-    private var lastChange: (previous: String?, current: String)?
 
     public init() {}
 
@@ -24,7 +23,7 @@ public final class TopicController {
         let token = UUID()
         generation = token
         isGenerating = true
-        message = "正在生成话题…"
+        message = nil
         task = Task { @MainActor in
             defer {
                 if generation == token {
@@ -46,7 +45,6 @@ public final class TopicController {
                 }
                 let separator = base.hasSuffix("\n\n") ? "" : (base.hasSuffix("\n") ? "\n" : "\n\n")
                 let suffix = separator + tags.map { "#" + $0 }.joined(separator: " ")
-                lastChange = (previous, suffix)
                 appended = suffix
                 model.markdown = base + suffix
                 message = nil
@@ -57,24 +55,10 @@ public final class TopicController {
         }
     }
 
-    public func canUndo(in body: String) -> Bool {
-        lastChange.map { body.hasSuffix($0.current) } ?? false
-    }
-
-    public func undo(in model: DispatchModel) {
-        guard !isGenerating, model.overallPhase == .pending,
-              let lastChange, canUndo(in: model.markdown) else { return }
-        model.markdown = String(model.markdown.dropLast(lastChange.current.count)) + (lastChange.previous ?? "")
-        appended = lastChange.previous
-        self.lastChange = nil
-        message = nil
-    }
-
     public func contentChanged(to body: String) {
         cancel()
         if let appended, !body.hasSuffix(appended) {
             self.appended = nil
-            lastChange = nil
         }
     }
 

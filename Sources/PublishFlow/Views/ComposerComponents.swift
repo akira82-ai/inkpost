@@ -85,13 +85,19 @@ struct ComposerFields: View {
                             .frame(minWidth: 34, minHeight: 26).contentShape(Rectangle())
                     }.buttonStyle(.plain).disabled(model.markdown.isEmpty || !editable)
                         .accessibilityLabel("清空正文")
-                    Button("生成话题") { topics.generate(for: model) }
-                        .disabled(!editable || topics.isGenerating || model.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    if topics.isGenerating {
-                        Button("取消") { topics.cancel() }
-                    } else if editable && topics.canUndo(in: model.markdown) {
-                        Button("撤销") { topics.undo(in: model) }
+                    Button { topics.generate(for: model) } label: {
+                        HStack(spacing: 5) {
+                            Text(topics.isGenerating ? "生成中" : "生成话题")
+                            if topics.isGenerating {
+                                ProgressView().controlSize(.mini).scaleEffect(0.8)
+                            }
+                        }
+                        .frame(minHeight: 26)
+                        .contentShape(Rectangle())
                     }
+                    .accessibilityLabel(topics.isGenerating ? "正在生成话题" : "生成话题")
+                    .disabled(!editable || topics.isGenerating || model.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .padding(.leading, 10)
                     Spacer(minLength: 0)
                     Text("\(model.markdown.count) 字").font(InkStyle.font(10)).monospacedDigit()
                         .foregroundStyle(InkStyle.placeholder).padding(.horizontal, 4).padding(.trailing, 20)

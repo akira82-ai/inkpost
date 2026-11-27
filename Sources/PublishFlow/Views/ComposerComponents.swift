@@ -71,6 +71,7 @@ struct ComposerFields: View {
     let onFiles: ([String]) -> Void
     @State private var topics = TopicController()
     @State private var titles = TitleController()
+    @State private var layout = LayoutController()
     @FocusState private var titleFocused: Bool
     private var editable: Bool { model.overallPhase == .pending }
     private var hasBody: Bool { !model.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -115,6 +116,10 @@ struct ComposerFields: View {
                             .frame(minWidth: 34, minHeight: 26).contentShape(Rectangle())
                     }.buttonStyle(.plain).disabled(model.markdown.isEmpty || !editable)
                         .accessibilityLabel("清空正文")
+                    GenerateTextButton(title: "优化排版", isGenerating: layout.isGenerating) {
+                        layout.format(for: model)
+                    }.disabled(!editable || !hasBody)
+                        .padding(.leading, 10)
                     GenerateTextButton(title: "生成话题", isGenerating: topics.isGenerating) {
                         topics.generate(for: model)
                     }.disabled(!editable || !hasBody)
@@ -127,7 +132,7 @@ struct ComposerFields: View {
                     Text("\(model.markdown.count) 字").font(InkStyle.font(10)).monospacedDigit()
                         .foregroundStyle(InkStyle.placeholder).padding(.horizontal, 4).padding(.trailing, 20)
                 }.buttonStyle(.plain).font(InkStyle.font(10)).frame(height: 30).background(InkStyle.paper)
-                if editable, let message = topics.message {
+                if editable, let message = layout.message ?? topics.message {
                     Text(message).font(.caption).foregroundStyle(InkStyle.ink)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -136,11 +141,11 @@ struct ComposerFields: View {
             }.frame(height: ceil(6 * 23.4 + 10) + 30)
 
         }.foregroundStyle(InkStyle.ink)
-            .onChange(of: model.markdown) { _, body in topics.contentChanged(to: body); titles.cancel() }
+            .onChange(of: model.markdown) { _, body in topics.contentChanged(to: body); titles.cancel(); layout.cancel() }
             .onChange(of: model.title) { topics.cancel(); titles.cancel() }
             .onChange(of: model.selectedPlatforms) { topics.cancel(); titles.cancel() }
-            .onChange(of: editable) { topics.cancel(); titles.cancel() }
-            .onDisappear { topics.cancel(); titles.cancel() }
+            .onChange(of: editable) { topics.cancel(); titles.cancel(); layout.cancel() }
+            .onDisappear { topics.cancel(); titles.cancel(); layout.cancel() }
     }
 }
 

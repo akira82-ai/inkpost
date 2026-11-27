@@ -89,10 +89,6 @@ struct ComposerFields: View {
                             .allowsHitTesting(false).accessibilityHidden(true)
                     }
                 }
-                GenerateTextButton(title: "生成标题", isGenerating: titles.isGenerating) {
-                    titles.generate(for: model)
-                }.disabled(!editable || !hasBody || !model.title.isEmpty)
-                    .padding(.leading, 10)
                 QuietIcon(symbol: "xmark", label: "清空标题") { model.title = ""; titleFocused = true }
                     .opacity(model.title.isEmpty ? 0 : 1).disabled(model.title.isEmpty || !editable)
                     .accessibilityHidden(model.title.isEmpty).frame(width: 30)
@@ -122,6 +118,10 @@ struct ComposerFields: View {
                     GenerateTextButton(title: "生成话题", isGenerating: topics.isGenerating) {
                         topics.generate(for: model)
                     }.disabled(!editable || !hasBody)
+                        .padding(.leading, 10)
+                    GenerateTextButton(title: "生成标题", isGenerating: titles.isGenerating) {
+                        titles.generate(for: model)
+                    }.disabled(!editable || !hasBody || !model.title.isEmpty)
                         .padding(.leading, 10)
                     Spacer(minLength: 0)
                     Text("\(model.markdown.count) 字").font(InkStyle.font(10)).monospacedDigit()

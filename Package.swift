@@ -16,6 +16,7 @@ let package = Package(
             resources: [
                 .copy("Adapters"),
                 .copy("Fixtures"),
+                .copy("Prompts"),
             ]
         ),
         // SwiftUI App

@@ -46,6 +46,7 @@ struct ComposerFields: View {
     var bodyFocusRequest: UUID?
     let onImages: (Data) -> Void
     let onFiles: ([String]) -> Void
+    @State private var topics = TopicController()
     @FocusState private var titleFocused: Bool
     private var editable: Bool { model.overallPhase == .pending }
     var body: some View {
@@ -84,15 +85,31 @@ struct ComposerFields: View {
                             .frame(minWidth: 34, minHeight: 26).contentShape(Rectangle())
                     }.buttonStyle(.plain).disabled(model.markdown.isEmpty || !editable)
                         .accessibilityLabel("清空正文")
+                    Button("生成话题") { topics.generate(for: model) }
+                        .disabled(!editable || topics.isGenerating || model.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    if topics.isGenerating {
+                        Button("取消") { topics.cancel() }
+                    } else if editable && topics.canUndo(in: model.markdown) {
+                        Button("撤销") { topics.undo(in: model) }
+                    }
                     Spacer(minLength: 0)
                     Text("\(model.markdown.count) 字").font(InkStyle.font(10)).monospacedDigit()
                         .foregroundStyle(InkStyle.placeholder).padding(.horizontal, 4).padding(.trailing, 20)
-                }.frame(height: 30).background(InkStyle.paper)
+                }.buttonStyle(.plain).font(InkStyle.font(10)).frame(height: 30).background(InkStyle.paper)
+                if editable, let message = topics.message {
+                    Text(message).font(.caption).foregroundStyle(InkStyle.ink)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
 
             // Six 23.4pt lines plus text insets; the 30pt footer never scrolls.
             }.frame(height: ceil(6 * 23.4 + 10) + 30)
 
         }.foregroundStyle(InkStyle.ink)
+            .onChange(of: model.markdown) { _, body in topics.contentChanged(to: body) }
+            .onChange(of: model.title) { topics.cancel() }
+            .onChange(of: model.selectedPlatforms) { topics.cancel() }
+            .onChange(of: editable) { topics.cancel() }
+            .onDisappear { topics.cancel() }
     }
 }
 
